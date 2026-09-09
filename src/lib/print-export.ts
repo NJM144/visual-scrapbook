@@ -17,6 +17,13 @@ import { strToU8, zipSync } from "fflate";
 import { BLEED_MM, effectiveDpi, mmToPt, mmToPx, spineWidthMm } from "./print-formats";
 import { hexToRgb01, type BookTheme } from "./book-themes";
 import type { BookPlan } from "./book-layout";
+import {
+  TILE_COLUMNS,
+  findCoverTemplate,
+  motifIsFilled,
+  motifPath,
+  resolveMotif,
+} from "./cover-templates";
 import { computePlacement, normalizeFraming, type Framing } from "./photo-framing";
 
 /** Marge extérieure portant les traits de coupe, au-delà du fond perdu. */
@@ -306,6 +313,35 @@ function fitText(text: string, font: PDFFont, sizePt: number, maxWidthPt: number
   return cut + "…";
 }
 
+/**
+ * Pose un motif dans la page.
+ *
+ * Le chemin est décrit dans un carré de 100 × 100, origine en haut à gauche —
+ * exactement la convention de `drawSvgPath`, qui ancre le repère SVG au point
+ * donné. D'où le calcul de `y` sur le bord *haut* du motif et non le bas.
+ */
+function drawMotif(
+  sheet: Sheet,
+  motif: string,
+  xMm: number,
+  yMm: number,
+  sizeMm: number,
+  hex: string,
+  opacity = 1,
+) {
+  const filled = motifIsFilled(motif as never);
+  const scale = mmToPt(sizeMm) / 100;
+
+  sheet.page.drawSvgPath(motifPath(motif as never), {
+    x: sheet.offsetPt + mmToPt(xMm),
+    y: sheet.heightPt - sheet.offsetPt - mmToPt(yMm),
+    scale,
+    ...(filled
+      ? { color: color(hex), opacity }
+      : { borderColor: color(hex), borderWidth: 3 * scale, borderOpacity: opacity }),
+  });
+}
+
 /* ------------------------------------------------------------------ export */
 
 export interface ExportOptions {
@@ -315,11 +351,13 @@ export interface ExportOptions {
   meta: ExportMeta;
   /** Photo de couverture ; la première de l'album par défaut. */
   coverPhoto?: ExportPhoto | undefined;
+  /** Modèle de couverture ; « photo pleine page » par défaut. */
+  coverTemplate?: string | undefined;
   onProgress?: (done: number, total: number, label: string) => void;
 }
 
 export async function exportBook(options: ExportOptions): Promise<ExportResult> {
-  const { plan, theme, photos, meta, coverPhoto, onProgress } = options;
+  const { plan, theme, photos, meta, coverPhoto, coverTemplate, onProgress } = options;
   const format = plan.format;
   const warnings: string[] = [];
 
@@ -477,90 +515,147 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   // gauche, comme le livre se présente une fois relié et mis à plat.
   const frontX = format.widthMm + spine;
   const photo = coverPhoto ?? photos[0];
+  const template = findCoverTemplate(coverTemplate);
+  const motif = resolveMotif(template, theme);
+  const W = format.widthMm;
+  const H = format.heightMm;
+  const ink = theme.coverInk;
+  const big = W > 250 ? 34 : 24;
 
-  if (photo && theme.coverStyle !== "aplat") {
-    if (theme.coverStyle === "photo_pleine") {
-      // Débordement de 3 mm sur les bords extérieurs, pas côté dos.
-      const rendered = await renderSlot(
-        photo.url,
-        format.widthMm + BLEED_MM,
-        format.heightMm + BLEED_MM * 2,
-        normalizeFraming(photo.framing),
-        theme.coverBackground,
-      );
-      const image = await cover.embedJpg(rendered.bytes);
-      sheet.page.drawImage(
-        image,
-        place(sheet, frontX, -BLEED_MM, format.widthMm + BLEED_MM, format.heightMm + BLEED_MM * 2),
-      );
-      // Voile sombre pour que le titre reste lisible sur n'importe quelle photo.
-      sheet.page.drawRectangle({
-        ...place(sheet, frontX, format.heightMm * 0.45, format.widthMm, format.heightMm * 0.55),
-        color: color(theme.coverBackground),
-        opacity: 0.6,
-      });
-    } else {
-      const inset = 18;
-      const rendered = await renderSlot(
-        photo.url,
-        format.widthMm - inset * 2,
-        format.heightMm * 0.52,
-        normalizeFraming(photo.framing),
-        theme.coverBackground,
-      );
-      const image = await cover.embedJpg(rendered.bytes);
-      sheet.page.drawImage(
-        image,
-        place(sheet, frontX + inset, inset, format.widthMm - inset * 2, format.heightMm * 0.52),
-      );
+  /** Texte cadré dans le plat recto, tronqué s'il déborde. */
+  const drawFrontText = (
+    text: string,
+    font: PDFFont,
+    size: number,
+    yMm: number,
+    hex: string,
+    align: "center" | "left" = "center",
+    insetMm = 15,
+  ) => {
+    if (!text) return;
+    const fitted = fitText(text, font, size, mmToPt(W - insetMm * 2));
+    const widthMm = (font.widthOfTextAtSize(fitted, size) / 72) * 25.4;
+    const xMm = align === "center" ? frontX + (W - widthMm) / 2 : frontX + insetMm;
+    const point = place(sheet, xMm, yMm, 0, 0);
+    sheet.page.drawText(fitted, { x: point.x, y: point.y, size, font, color: color(hex) });
+  };
+
+  /** Photo cadrée dans un rectangle du plat recto. */
+  const placePhoto = async (xMm: number, yMm: number, widthMm: number, heightMm: number) => {
+    if (!photo) return;
+    const rendered = await renderSlot(
+      photo.url,
+      widthMm,
+      heightMm,
+      normalizeFraming(photo.framing),
+      theme.coverBackground,
+    );
+    const image = await cover.embedJpg(rendered.bytes);
+    sheet.page.drawImage(image, place(sheet, xMm, yMm, widthMm, heightMm));
+  };
+
+  if (template.kind === "photo_pleine") {
+    // Débordement de 3 mm sur les bords extérieurs, pas côté dos.
+    await placePhoto(frontX, -BLEED_MM, W + BLEED_MM, H + BLEED_MM * 2);
+    // Voile pour que le titre reste lisible sur n'importe quelle photo.
+    sheet.page.drawRectangle({
+      ...place(sheet, frontX, 0, W, H * 0.55),
+      color: color(theme.coverBackground),
+      opacity: 0.62,
+    });
+    drawFrontText(meta.title, coverBody, big, H * 0.16, ink);
+    drawFrontText(meta.subtitle, coverItalic, 12, H * 0.16 + 11, ink);
+    drawMotif(sheet, motif, frontX + W / 2 - W * 0.11, H * 0.22, W * 0.22, ink, 0.9);
+  } else if (template.kind === "photo_encadree") {
+    const inset = W * 0.09;
+    drawFrontText(meta.title, coverBody, big * 0.85, H * 0.15, ink);
+    drawFrontText(meta.subtitle, coverItalic, 11, H * 0.15 + 10, ink);
+    await placePhoto(frontX + inset, H * 0.24, W - inset * 2, H * 0.52);
+    drawMotif(sheet, motif, frontX + W / 2 - W * 0.09, H * 0.82, W * 0.18, ink, 0.75);
+  } else if (template.kind === "encart") {
+    drawMotif(sheet, motif, frontX + W * 0.11, H * 0.46 - W * 0.39, W * 0.78, ink, 0.9);
+    drawFrontText(meta.title, coverBody, big * 1.15, H * 0.14, ink);
+
+    // Encart bordé de blanc, façon tirage collé sur la couverture.
+    const cardW = W * 0.46;
+    const cardX = frontX + (W - cardW) / 2;
+    const cardY = H * 0.46 - cardW * 0.62;
+    sheet.page.drawRectangle({
+      ...place(sheet, cardX, cardY, cardW, cardW * 1.24),
+      color: rgb(1, 1, 1),
+    });
+    await placePhoto(cardX + cardW * 0.05, cardY + cardW * 0.05, cardW * 0.9, cardW * 0.9);
+    drawFrontText(meta.subtitle, coverItalic, 10, H * 0.92, ink);
+  } else if (template.kind === "icone") {
+    drawMotif(sheet, motif, frontX + W * 0.04, H * 0.52 - W * 0.46, W * 0.92, ink, 0.16);
+    drawFrontText(meta.title, coverBody, big * 1.2, H * 0.15, ink, "left");
+    drawFrontText(meta.subtitle, coverItalic, 11, H * 0.15 + 11, ink, "left");
+
+    const photoW = W * 0.38;
+    await placePhoto(
+      frontX + W - photoW - W * 0.08,
+      H * 0.92 - photoW * 0.75,
+      photoW,
+      photoW * 0.75,
+    );
+  } else if (template.kind === "motif_repete") {
+    const tile = W / TILE_COLUMNS;
+    const rows = Math.ceil(H / tile);
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < TILE_COLUMNS; column += 1) {
+        drawMotif(
+          sheet,
+          motif,
+          frontX + column * tile + tile * 0.1,
+          row * tile + tile * 0.1,
+          tile * 0.8,
+          ink,
+          0.85,
+        );
+      }
     }
-  }
-
-  const titleSize = format.widthMm > 250 ? 34 : 24;
-  const titleY =
-    theme.coverStyle === "photo_encadree" ? format.heightMm * 0.68 : format.heightMm * 0.72;
-  const maxTitlePt = mmToPt(format.widthMm - 30);
-
-  {
-    const text = fitText(meta.title, coverBody, titleSize, maxTitlePt);
-    const width = coverBody.widthOfTextAtSize(text, titleSize);
-    const xMm = frontX + (format.widthMm - (width / 72) * 25.4) / 2;
-    const p = place(sheet, xMm, titleY, 0, 0);
-    sheet.page.drawText(text, {
-      x: p.x,
-      y: p.y,
-      size: titleSize,
-      font: coverBody,
-      color: color(theme.coverInk),
+    // Plaque centrale : sans elle, le titre se perdrait dans le motif.
+    const plateW = W * 0.62;
+    const plateH = H * 0.22;
+    sheet.page.drawRectangle({
+      ...place(sheet, frontX + (W - plateW) / 2, (H - plateH) / 2, plateW, plateH),
+      color: color(theme.paper),
+      borderColor: color(ink),
+      borderWidth: 0.8,
     });
-  }
-
-  if (meta.subtitle) {
-    const text = fitText(meta.subtitle, coverItalic, 12, maxTitlePt);
-    const width = coverItalic.widthOfTextAtSize(text, 12);
-    const xMm = frontX + (format.widthMm - (width / 72) * 25.4) / 2;
-    const p = place(sheet, xMm, titleY + 10, 0, 0);
-    sheet.page.drawText(text, {
-      x: p.x,
-      y: p.y,
-      size: 12,
-      font: coverItalic,
-      color: color(theme.coverInk),
+    drawFrontText(meta.title, coverBody, big * 0.75, H * 0.5, theme.ink);
+    drawFrontText(meta.subtitle, coverItalic, 10, H * 0.5 + 9, theme.accent);
+  } else if (template.kind === "bandeau") {
+    await placePhoto(frontX, -BLEED_MM, W + BLEED_MM, H * 0.62 + BLEED_MM);
+    sheet.page.drawRectangle({
+      ...place(sheet, frontX, H * 0.62, W + BLEED_MM, H * 0.38 + BLEED_MM),
+      color: color(theme.coverBackground),
     });
+    drawFrontText(meta.title, coverBody, big * 0.9, H * 0.76, ink, "left");
+    drawFrontText(meta.subtitle, coverItalic, 11, H * 0.76 + 10, ink, "left");
+    drawMotif(sheet, motif, frontX + W * 0.09, H * 0.84, W * 0.16, ink, 0.8);
+  } else {
+    // Typographique : aucune photo, le titre porte seul.
+    drawMotif(sheet, motif, frontX + W / 2 - W * 0.08, H * 0.3, W * 0.16, ink, 0.8);
+    sheet.page.drawRectangle({
+      ...place(sheet, frontX + W * 0.3, H * 0.46, W * 0.4, 0.5),
+      color: color(ink),
+      opacity: 0.5,
+    });
+    drawFrontText(meta.title, coverBody, big * 1.3, H * 0.6, ink);
+    drawFrontText(meta.subtitle, coverItalic, 12, H * 0.6 + 12, ink);
   }
-
-  drawOrnament(sheet, theme, frontX + format.widthMm / 2, titleY + 20);
 
   // Titre au dos, seulement si le dos est assez large pour rester lisible.
   if (spine >= 8) {
-    const text = fitText(meta.title, coverBody, 10, mmToPt(format.heightMm - 40));
-    const p = place(sheet, format.widthMm + spine / 2, format.heightMm / 2, 0, 0);
-    sheet.page.drawText(text, {
+    const spineText = fitText(meta.title, coverBody, 10, mmToPt(H - 40));
+    const p = place(sheet, W + spine / 2, H / 2, 0, 0);
+    sheet.page.drawText(spineText, {
       x: p.x + 3,
-      y: p.y - coverBody.widthOfTextAtSize(text, 10) / 2,
+      y: p.y - coverBody.widthOfTextAtSize(spineText, 10) / 2,
       size: 10,
       font: coverBody,
-      color: color(theme.coverInk),
+      color: color(ink),
       rotate: { type: "degrees", angle: 90 } as never,
     });
   }

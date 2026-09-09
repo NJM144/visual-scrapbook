@@ -20,6 +20,7 @@ import { BOOK_THEMES, findTheme } from "@/lib/book-themes";
 import { PRINT_FORMATS, findFormat, spineWidthMm, effectiveDpi } from "@/lib/print-formats";
 import { layoutFromPlan, planBook, planFromLayout, type AlbumLayout } from "@/lib/book-layout";
 import { CoverPreview } from "@/components/CoverPreview";
+import { COVER_TEMPLATES } from "@/lib/cover-templates";
 import { BookPages } from "@/components/BookPages";
 import { PhotoFramer } from "@/components/PhotoFramer";
 import { PageComposer } from "@/components/PageComposer";
@@ -118,6 +119,7 @@ function BookStudio() {
   const [coverTitle, setCoverTitle] = useState("");
   const [coverSubtitle, setCoverSubtitle] = useState("");
   const [coverPhotoId, setCoverPhotoId] = useState<string | null>(null);
+  const [coverTemplateId, setCoverTemplateId] = useState("photo_pleine");
 
   /** Ordre en cours d'édition, pas encore enregistré. */
   const [order, setOrder] = useState<string[]>([]);
@@ -151,6 +153,7 @@ function BookStudio() {
     setCoverTitle(album.cover_title ?? album.title);
     setCoverSubtitle(album.cover_subtitle ?? "");
     setCoverPhotoId(album.cover_photo_id);
+    setCoverTemplateId(album.cover_template);
     setLayout(album.layout);
     setLayoutDirty(false);
   }, [album]);
@@ -465,6 +468,7 @@ function BookStudio() {
           albumId,
           theme: themeId,
           pageFormat: formatId,
+          coverTemplate: coverTemplateId,
           coverTitle: coverTitle.trim() || null,
           coverSubtitle: coverSubtitle.trim() || null,
           coverPhotoId,
@@ -513,6 +517,7 @@ function BookStudio() {
           framing: photo.framing,
         })),
         coverPhoto: coverPhoto ? { id: coverPhoto.id, url: coverPhoto.signedUrl } : undefined,
+        coverTemplate: coverTemplateId,
         meta: { title, subtitle: coverSubtitle.trim(), dateLabel },
         onProgress: (done, total, label) => setProgress({ done, total, label }),
       });
@@ -622,6 +627,7 @@ function BookStudio() {
                 title={title}
                 subtitle={coverSubtitle}
                 photoUrl={coverPhoto?.signedUrl}
+                templateId={coverTemplateId}
               />
             </div>
             {photos.length === 0 ? (
@@ -951,6 +957,43 @@ function BookStudio() {
               </section>
 
               <section>
+                <h3 className="mb-1 font-serif text-2xl text-foreground">Couverture</h3>
+                <p className="mb-5 text-sm text-muted-foreground">
+                  La composition. Le thème, lui, en donne les couleurs — les deux se combinent
+                  librement.
+                </p>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                  {COVER_TEMPLATES.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setCoverTemplateId(option.id)}
+                      className={
+                        "rounded-2xl border p-3 text-left transition-colors " +
+                        (coverTemplateId === option.id
+                          ? "border-terre bg-terre/5 ring-2 ring-terre/30"
+                          : "border-border hover:bg-muted")
+                      }
+                    >
+                      <span className="pointer-events-none block">
+                        <CoverPreview
+                          theme={theme}
+                          format={format}
+                          title={title}
+                          subtitle=""
+                          photoUrl={coverPhoto?.signedUrl}
+                          templateId={option.id}
+                        />
+                      </span>
+                      <span className="mt-1 block text-xs leading-snug text-muted-foreground">
+                        {option.description}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section>
                 <h3 className="mb-1 font-serif text-2xl text-foreground">Thème</h3>
                 <p className="mb-5 text-sm text-muted-foreground">
                   Papier, encre, typographie et motif de couverture.
@@ -1086,6 +1129,7 @@ function BookStudio() {
                 title={title}
                 subtitle={coverSubtitle}
                 photoUrl={coverPhoto?.signedUrl}
+                templateId={coverTemplateId}
               />
 
               <dl className="rounded-2xl border border-border bg-card p-5 text-sm">

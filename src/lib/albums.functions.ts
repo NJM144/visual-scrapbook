@@ -279,6 +279,7 @@ export const updateAlbumBook = createServerFn({ method: "POST" })
         albumId: z.string().uuid(),
         theme: z.string().min(1).max(40),
         pageFormat: z.string().min(1).max(40),
+        coverTemplate: z.string().min(1).max(40),
         coverTitle: z.string().max(120).nullable().optional(),
         coverSubtitle: z.string().max(160).nullable().optional(),
         coverPhotoId: z.string().uuid().nullable().optional(),
@@ -291,6 +292,7 @@ export const updateAlbumBook = createServerFn({ method: "POST" })
       .update({
         theme: data.theme,
         page_format: data.pageFormat,
+        cover_template: data.coverTemplate,
         cover_title: data.coverTitle ?? null,
         cover_subtitle: data.coverSubtitle ?? null,
         cover_photo_id: data.coverPhotoId ?? null,

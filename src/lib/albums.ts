@@ -14,6 +14,8 @@ export interface Album {
   cover_title: string | null;
   cover_subtitle: string | null;
   cover_photo_id: string | null;
+  /** Composition de la couverture (voir cover-templates.ts). */
+  cover_template: string;
   /**
    * Disposition manuelle des pages ; `null` = découpage automatique.
    * Typée explicitement plutôt qu'en `unknown` : les valeurs traversant une
