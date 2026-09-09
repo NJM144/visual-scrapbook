@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
+  deletePhoto,
   getAlbumForExport,
   getIsAdmin,
   getPhotosForExport,
@@ -22,6 +23,7 @@ import { CoverPreview } from "@/components/CoverPreview";
 import { BookPages } from "@/components/BookPages";
 import { PhotoFramer } from "@/components/PhotoFramer";
 import { PageComposer } from "@/components/PageComposer";
+import { useAuth } from "@/hooks/use-auth";
 import { describePhotoAI, suggestAlbumTextsAI } from "@/lib/ai.functions";
 import { createAiThumbnail } from "@/lib/image-processing";
 import { normalizeFraming, type Framing } from "@/lib/photo-framing";
@@ -80,6 +82,7 @@ function slugify(value: string): string {
 function BookStudio() {
   const { albumId } = Route.useParams();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const fetchAlbum = useServerFn(getAlbumForExport);
   const fetchPhotos = useServerFn(getPhotosForExport);
   const fetchIsAdmin = useServerFn(getIsAdmin);
@@ -88,6 +91,7 @@ function BookStudio() {
   const saveOrder = useServerFn(reorderPhotos);
   const saveLayout = useServerFn(updateAlbumLayout);
   const savePhotoMeta = useServerFn(updatePhotoMeta);
+  const removePhoto = useServerFn(deletePhoto);
   const saveFraming = useServerFn(updatePhotoFraming);
   const saveAspects = useServerFn(saveAspectRatios);
   const describeAI = useServerFn(describePhotoAI);
@@ -189,6 +193,11 @@ function BookStudio() {
       }));
   }, [order, rawPhotos, captions, framings]);
 
+  // Un administrateur peut consulter et exporter l'album d'un client, mais la
+  // RLS lui interdit d'y écrire. Sans ce test, les boutons d'édition seraient
+  // visibles et échoueraient en silence.
+  const isOwner = Boolean(user && album && album.user_id === user.id);
+
   const theme = findTheme(themeId);
   const format = findFormat(formatId);
   // Les rapports d'aspect guident le découpage des pages : deux photos
@@ -246,6 +255,39 @@ function BookStudio() {
       await queryClient.invalidateQueries({ queryKey: ["photos-export", albumId] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Légende non enregistrée");
+    }
+  };
+
+  /**
+   * Retire une photo de l'album.
+   *
+   * La case qu'elle occupait dans la disposition est libérée dans la foulée :
+   * laisser un identifiant mort laisserait un trou que l'auteur ne pourrait ni
+   * comprendre ni combler.
+   */
+  const handleDeletePhoto = async (photoId: string, storagePath: string) => {
+    if (!window.confirm("Supprimer définitivement cette photo de l’album ?")) return;
+
+    try {
+      await removePhoto({ data: { photoId, storagePath } });
+
+      if (layout) {
+        const cleaned = {
+          pages: layout.pages.map((page) => ({
+            ...page,
+            slots: page.slots.map((slot) => (slot === photoId ? null : slot)),
+          })),
+        };
+        setLayout(cleaned);
+        await saveLayout({ data: { albumId, layout: cleaned } });
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ["photos-export", albumId] });
+      await queryClient.invalidateQueries({ queryKey: ["photos", albumId] });
+      await queryClient.invalidateQueries({ queryKey: ["albums"] });
+      toast.success("Photo supprimée.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Suppression impossible");
     }
   };
 
@@ -539,6 +581,13 @@ function BookStudio() {
           </button>
         </header>
 
+        {album && !isOwner ? (
+          <p className="mb-6 rounded-2xl border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
+            Album d’un autre compte : consultation et export uniquement. Les modifications ne seront
+            pas enregistrées.
+          </p>
+        ) : null}
+
         <div className="mb-8 -mx-4 flex gap-1 overflow-x-auto whitespace-nowrap border-b border-border px-4 sm:mx-0 sm:gap-2 sm:px-0">
           {TABS.map((item) => (
             <button
@@ -737,6 +786,16 @@ function BookStudio() {
                       >
                         ↓
                       </button>
+                      {isOwner ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleDeletePhoto(photo.id, photo.storage_path)}
+                          aria-label="Supprimer cette photo"
+                          className="size-11 rounded-full border border-input text-destructive transition-colors hover:bg-destructive/10"
+                        >
+                          ✕
+                        </button>
+                      ) : null}
                     </span>
                   </div>
 

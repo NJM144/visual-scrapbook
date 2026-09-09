@@ -74,6 +74,10 @@ function AlbumDetailPage() {
   };
 
   const handleDeletePhoto = async (photoId: string, storagePath: string) => {
+    // La photo est retirée du stockage en même temps que de la base : il n'y a
+    // pas de corbeille, et l'original est resté sur le téléphone.
+    if (!window.confirm("Supprimer définitivement cette photo de l’album ?")) return;
+
     try {
       await removePhoto({ data: { photoId, storagePath } });
       await queryClient.invalidateQueries({ queryKey: ["photos", albumId] });
@@ -186,9 +190,10 @@ function AlbumDetailPage() {
                   <button
                     type="button"
                     onClick={() => handleDeletePhoto(photo.id, photo.storage_path)}
-                    className="absolute right-3 top-3 rounded-full bg-background/90 px-3 py-1.5 text-xs font-medium text-foreground opacity-0 transition-opacity hover:bg-background group-hover:opacity-100"
+                    aria-label="Supprimer cette photo"
+                    className="absolute right-2 top-2 flex size-11 items-center justify-center rounded-full bg-background/90 text-lg font-medium text-destructive shadow-sm backdrop-blur transition-colors hover:bg-background"
                   >
-                    Supprimer
+                    ✕
                   </button>
                 </figure>
               ))}
