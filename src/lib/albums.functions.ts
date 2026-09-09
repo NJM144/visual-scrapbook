@@ -2,6 +2,20 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { AdminAlbumRow, Album, AlbumPreview, PhotoWithSignedUrl } from "./albums";
+import { isAlbumLayout } from "./book-layout";
+
+/**
+ * `albums.layout` est du JSON libre côté base. On le valide au passage plutôt
+ * que de le forcer : une disposition corrompue doit faire retomber l'album sur
+ * le découpage automatique, pas casser l'affichage.
+ */
+function toAlbum(row: Record<string, unknown>): Album {
+  const layout = row["layout"];
+  return {
+    ...(row as unknown as Album),
+    layout: isAlbumLayout(layout) ? layout : null,
+  };
+}
 
 export const getAlbums = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -13,7 +27,7 @@ export const getAlbums = createServerFn({ method: "GET" })
       .order("created_at", { ascending: false });
 
     if (error) throw error;
-    return data ?? [];
+    return (data ?? []).map(toAlbum);
   });
 
 export const getAlbum = createServerFn({ method: "GET" })
@@ -28,7 +42,7 @@ export const getAlbum = createServerFn({ method: "GET" })
       .single();
 
     if (error || !album) throw new Error("Album introuvable");
-    return album;
+    return toAlbum(album);
   });
 
 export const createAlbum = createServerFn({ method: "POST" })
@@ -53,7 +67,7 @@ export const createAlbum = createServerFn({ method: "POST" })
       .single();
 
     if (error) throw error;
-    return album;
+    return toAlbum(album);
   });
 
 export const getPhotos = createServerFn({ method: "GET" })
@@ -95,6 +109,9 @@ export const createPhoto = createServerFn({ method: "POST" })
         storagePath: z.string().min(1),
         caption: z.string().max(300).optional(),
         orderIndex: z.number().int().min(0).max(100000).optional(),
+        takenAt: z.string().datetime().optional(),
+        latitude: z.number().min(-90).max(90).optional(),
+        longitude: z.number().min(-180).max(180).optional(),
       })
       .parse(data),
   )
@@ -117,6 +134,9 @@ export const createPhoto = createServerFn({ method: "POST" })
         url: "",
         caption: data.caption ?? null,
         order_index: data.orderIndex ?? 0,
+        taken_at: data.takenAt ?? null,
+        latitude: data.latitude ?? null,
+        longitude: data.longitude ?? null,
       })
       .select()
       .single();
@@ -241,7 +261,7 @@ export const getAlbumsWithPreview = createServerFn({ method: "GET" })
     return albums.map((album) => {
       const coverPath = covers.get(album.id);
       return {
-        ...album,
+        ...toAlbum(album),
         photo_count: counts.get(album.id) ?? 0,
         cover_url: coverPath ? (signedByPath.get(coverPath) ?? null) : null,
       };
@@ -281,7 +301,7 @@ export const updateAlbumBook = createServerFn({ method: "POST" })
       .single();
 
     if (error) throw error;
-    return album;
+    return toAlbum(album);
   });
 
 /** Le compte courant a-t-il le rôle administrateur ? */
@@ -317,7 +337,7 @@ export const getAlbumForExport = createServerFn({ method: "GET" })
       .single();
 
     if (error || !album) throw new Error("Album introuvable");
-    return album;
+    return toAlbum(album);
   });
 
 /** Photos d'un album pour l'export, avec URL signées. Même règle RLS. */
@@ -502,5 +522,81 @@ export const saveAspectRatios = createServerFn({ method: "POST" })
 
       if (error) throw error;
     }
+    return { success: true };
+  });
+
+/** Disposition manuelle des pages. `null` rend la main au découpage automatique. */
+export const updateAlbumLayout = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data) =>
+    z
+      .object({
+        albumId: z.string().uuid(),
+        layout: z
+          .object({
+            pages: z
+              .array(
+                z.object({
+                  id: z.string().min(1).max(64),
+                  slots: z.array(z.string().uuid().nullable()).min(1).max(4),
+                }),
+              )
+              .max(300),
+          })
+          .nullable(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ context, data }) => {
+    const { error } = await context.supabase
+      .from("albums")
+      .update({ layout: data.layout })
+      .eq("id", data.albumId)
+      .eq("user_id", context.userId);
+
+    if (error) throw error;
+    return { success: true };
+  });
+
+/**
+ * Informations éditoriales d'une photo : ambiance, lieu, personnes.
+ *
+ * Les noms sont saisis par l'auteur. L'application ne fait aucune
+ * reconnaissance faciale : elle compte les visages et demande qui c'est.
+ */
+export const updatePhotoMeta = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data) =>
+    z
+      .object({
+        photoId: z.string().uuid(),
+        mood: z.string().max(200).nullable().optional(),
+        place: z.string().max(160).nullable().optional(),
+        people: z.array(z.string().min(1).max(80)).max(30).optional(),
+        faceCount: z.number().int().min(0).max(100).optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ context, data }) => {
+    const patch: {
+      mood?: string | null;
+      place?: string | null;
+      people?: string[];
+      face_count?: number;
+    } = {};
+    if (data.mood !== undefined) patch.mood = data.mood?.trim() || null;
+    if (data.place !== undefined) patch.place = data.place?.trim() || null;
+    if (data.people !== undefined) patch.people = data.people.map((name) => name.trim());
+    if (data.faceCount !== undefined) patch.face_count = data.faceCount;
+
+    if (Object.keys(patch).length === 0) return { success: true };
+
+    const { error } = await context.supabase
+      .from("photos")
+      .update(patch)
+      .eq("id", data.photoId)
+      .eq("user_id", context.userId);
+
+    if (error) throw error;
     return { success: true };
   });

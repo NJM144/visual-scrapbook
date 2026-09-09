@@ -14,6 +14,12 @@ export interface Album {
   cover_title: string | null;
   cover_subtitle: string | null;
   cover_photo_id: string | null;
+  /**
+   * Disposition manuelle des pages ; `null` = découpage automatique.
+   * Typée explicitement plutôt qu'en `unknown` : les valeurs traversant une
+   * fonction serveur doivent être sérialisables de façon vérifiable.
+   */
+  layout: { pages: { id: string; slots: (string | null)[] }[] } | null;
 }
 
 export interface Photo {
@@ -34,6 +40,16 @@ export interface Photo {
   fit: string;
   /** Largeur / hauteur de l'image, mesurée à l'analyse. */
   aspect_ratio: number | null;
+  /** Date de prise de vue lue dans l'EXIF. */
+  taken_at: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  place: string | null;
+  /** Noms saisis par l'auteur ; aucune reconnaissance faciale n'est faite. */
+  people: string[];
+  /** Ambiance proposée par l'IA, modifiable. */
+  mood: string | null;
+  face_count: number | null;
 }
 
 export interface PhotoWithSignedUrl extends Photo {

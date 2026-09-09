@@ -10,15 +10,18 @@ import {
   reorderPhotos,
   saveAspectRatios,
   updateAlbumBook,
+  updateAlbumLayout,
   updatePhotoCaption,
   updatePhotoFraming,
+  updatePhotoMeta,
 } from "@/lib/albums.functions";
 import { BOOK_THEMES, findTheme } from "@/lib/book-themes";
 import { PRINT_FORMATS, findFormat, spineWidthMm, effectiveDpi } from "@/lib/print-formats";
-import { planBook } from "@/lib/book-layout";
+import { layoutFromPlan, planBook, planFromLayout, type AlbumLayout } from "@/lib/book-layout";
 import { CoverPreview } from "@/components/CoverPreview";
 import { BookPages } from "@/components/BookPages";
 import { PhotoFramer } from "@/components/PhotoFramer";
+import { PageComposer } from "@/components/PageComposer";
 import { describePhotoAI, suggestAlbumTextsAI } from "@/lib/ai.functions";
 import { createAiThumbnail } from "@/lib/image-processing";
 import { normalizeFraming, type Framing } from "@/lib/photo-framing";
@@ -43,11 +46,12 @@ export const Route = createFileRoute("/_authenticated/albums/book/$albumId")({
   component: BookStudio,
 });
 
-type Tab = "apercu" | "mise-en-page" | "apparence";
+type Tab = "apercu" | "pages" | "mise-en-page" | "apparence";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "apercu", label: "Feuilleter" },
-  { id: "mise-en-page", label: "Disposer les photos" },
+  { id: "pages", label: "Pages" },
+  { id: "mise-en-page", label: "Photos et légendes" },
   { id: "apparence", label: "Thème et format" },
 ];
 
@@ -82,6 +86,8 @@ function BookStudio() {
   const saveBook = useServerFn(updateAlbumBook);
   const saveCaption = useServerFn(updatePhotoCaption);
   const saveOrder = useServerFn(reorderPhotos);
+  const saveLayout = useServerFn(updateAlbumLayout);
+  const savePhotoMeta = useServerFn(updatePhotoMeta);
   const saveFraming = useServerFn(updatePhotoFraming);
   const saveAspects = useServerFn(saveAspectRatios);
   const describeAI = useServerFn(describePhotoAI);
@@ -115,6 +121,12 @@ function BookStudio() {
   const [framings, setFramings] = useState<Record<string, Framing>>({});
   const [openFramer, setOpenFramer] = useState<string | null>(null);
   const [orderDirty, setOrderDirty] = useState(false);
+  const [moods, setMoods] = useState<Record<string, string>>({});
+  const [peoples, setPeoples] = useState<Record<string, string>>({});
+
+  /** Disposition manuelle ; `null` tant que l'auteur n'a rien réarrangé. */
+  const [layout, setLayout] = useState<AlbumLayout | null>(null);
+  const [layoutDirty, setLayoutDirty] = useState(false);
 
   const [analysis, setAnalysis] = useState<PhotoStats[] | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -135,6 +147,8 @@ function BookStudio() {
     setCoverTitle(album.cover_title ?? album.title);
     setCoverSubtitle(album.cover_subtitle ?? "");
     setCoverPhotoId(album.cover_photo_id);
+    setLayout(album.layout);
+    setLayoutDirty(false);
   }, [album]);
 
   const rawPhotos = useMemo(() => photosQuery.data ?? [], [photosQuery.data]);
@@ -153,6 +167,10 @@ function BookStudio() {
           }),
         ]),
       ),
+    );
+    setMoods(Object.fromEntries(rawPhotos.map((photo) => [photo.id, photo.mood ?? ""])));
+    setPeoples(
+      Object.fromEntries(rawPhotos.map((photo) => [photo.id, (photo.people ?? []).join(", ")])),
     );
     setOrderDirty(false);
   }, [rawPhotos]);
@@ -176,7 +194,15 @@ function BookStudio() {
   // Les rapports d'aspect guident le découpage des pages : deux photos
   // verticales côte à côte plutôt qu'empilées, c'est autant de rognage évité.
   const aspects = useMemo(() => photos.map((photo) => photo.aspect_ratio ?? 0), [photos]);
-  const plan = useMemo(() => planBook(aspects, formatId, theme), [aspects, formatId, theme]);
+  const photoIds = useMemo(() => photos.map((photo) => photo.id), [photos]);
+
+  // Le découpage automatique reste calculé même en disposition manuelle : c'est
+  // lui qui sert de point de départ quand l'auteur ouvre l'onglet Pages.
+  const autoPlan = useMemo(() => planBook(aspects, formatId, theme), [aspects, formatId, theme]);
+  const plan = useMemo(
+    () => (layout ? planFromLayout(layout, photoIds, aspects, formatId, theme) : autoPlan),
+    [layout, photoIds, aspects, formatId, theme, autoPlan],
+  );
 
   /** Rapport largeur/hauteur de l'emplacement occupé par chaque photo. */
   const slotAspects = useMemo(() => {
@@ -290,6 +316,7 @@ function BookStudio() {
 
     const nextCaptions: Record<string, string> = { ...captions };
     const nextFramings: Record<string, Framing> = { ...framings };
+    const nextMoods: Record<string, string> = { ...moods };
     let described = 0;
     let failed = 0;
 
@@ -333,6 +360,15 @@ function BookStudio() {
             nextCaptions[photo.id] = result.caption;
             await saveCaption({ data: { photoId: photo.id, caption: result.caption } });
           }
+
+          nextMoods[photo.id] = result.mood;
+          await savePhotoMeta({
+            data: {
+              photoId: photo.id,
+              mood: result.mood || null,
+              faceCount: result.faceCount,
+            },
+          });
           described += 1;
         } catch {
           failed += 1;
@@ -341,6 +377,7 @@ function BookStudio() {
 
       setCaptions(nextCaptions);
       setFramings(nextFramings);
+      setMoods(nextMoods);
 
       // Titre et sous-titre, déduits des légendes obtenues.
       setAiStep({ done: photos.length, total: photos.length + 1, label: "Titre de couverture…" });
@@ -394,6 +431,10 @@ function BookStudio() {
       if (orderDirty) {
         await saveOrder({ data: { albumId, photoIds: order } });
         setOrderDirty(false);
+      }
+      if (layoutDirty) {
+        await saveLayout({ data: { albumId, layout } });
+        setLayoutDirty(false);
       }
       await queryClient.invalidateQueries({ queryKey: ["photos-export", albumId] });
       toast.success("Album enregistré.");
@@ -463,7 +504,7 @@ function BookStudio() {
   }
 
   return (
-    <div className="px-6 py-12">
+    <div className="px-4 py-8 sm:px-6 sm:py-12">
       <div className="mx-auto max-w-6xl">
         <Link
           to="/albums/$albumId"
@@ -473,7 +514,7 @@ function BookStudio() {
           ← Retour à l’album
         </Link>
 
-        <header className="mt-6 mb-8 flex flex-wrap items-end justify-between gap-4">
+        <header className="mt-6 mb-8 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
           <div>
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-[0.18em] text-terre">
               Mon livre
@@ -488,20 +529,31 @@ function BookStudio() {
             type="button"
             onClick={handleSave}
             disabled={saving}
-            className="rounded-full bg-terre px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-terre/90 disabled:opacity-60"
+            className="w-full shrink-0 rounded-full bg-terre px-6 py-3.5 text-sm font-medium text-white transition-colors hover:bg-terre/90 disabled:opacity-60 sm:w-auto"
           >
-            {saving ? "Enregistrement…" : orderDirty ? "Enregistrer l’ordre" : "Enregistrer"}
+            {saving
+              ? "Enregistrement…"
+              : orderDirty || layoutDirty
+                ? "Enregistrer les changements"
+                : "Enregistrer"}
           </button>
         </header>
 
-        <div className="mb-8 flex flex-wrap gap-2 border-b border-border">
+        <div className="mb-8 -mx-4 flex gap-1 overflow-x-auto whitespace-nowrap border-b border-border px-4 sm:mx-0 sm:gap-2 sm:px-0">
           {TABS.map((item) => (
             <button
               key={item.id}
               type="button"
-              onClick={() => setTab(item.id)}
+              onClick={() => {
+                // Passer en disposition manuelle fige le découpage courant :
+                // sans cela l'auteur n'aurait rien à réarranger.
+                if (item.id === "pages" && !layout && photos.length > 0) {
+                  setLayout(layoutFromPlan(autoPlan, photoIds));
+                }
+                setTab(item.id);
+              }}
               className={
-                "-mb-px border-b-2 px-4 py-3 text-sm font-medium transition-colors " +
+                "-mb-px shrink-0 border-b-2 px-4 py-3.5 text-sm font-medium transition-colors " +
                 (tab === item.id
                   ? "border-terre text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground")
@@ -542,6 +594,39 @@ function BookStudio() {
                 dateLabel={dateLabel}
               />
             )}
+          </section>
+        ) : null}
+
+        {tab === "pages" ? (
+          <section>
+            {photos.length === 0 ? (
+              <p className="rounded-3xl border border-dashed border-border px-6 py-16 text-center text-sm text-muted-foreground">
+                Ajoutez des photos à l’album pour composer les pages.
+              </p>
+            ) : layout ? (
+              <>
+                <PageComposer
+                  layout={layout}
+                  photos={photos.map((photo) => ({ id: photo.id, signedUrl: photo.signedUrl }))}
+                  format={format}
+                  theme={theme}
+                  onChange={(next) => {
+                    setLayout(next);
+                    setLayoutDirty(true);
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLayout(null);
+                    setLayoutDirty(true);
+                  }}
+                  className="mt-4 text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                >
+                  Revenir à la disposition automatique
+                </button>
+              </>
+            ) : null}
           </section>
         ) : null}
 
@@ -626,7 +711,7 @@ function BookStudio() {
                         type="button"
                         onClick={() => setOpenFramer(openFramer === photo.id ? null : photo.id)}
                         className={
-                          "rounded-full border px-4 py-1.5 text-sm transition-colors " +
+                          "h-11 rounded-full border px-4 text-sm transition-colors " +
                           (openFramer === photo.id
                             ? "border-terre bg-terre/10"
                             : "border-input hover:bg-muted")
@@ -639,7 +724,7 @@ function BookStudio() {
                         onClick={() => move(index, -1)}
                         disabled={index === 0}
                         aria-label="Déplacer avant"
-                        className="rounded-full border border-input px-3 py-1.5 text-sm transition-colors hover:bg-muted disabled:opacity-40"
+                        className="size-11 rounded-full border border-input text-sm transition-colors hover:bg-muted disabled:opacity-40"
                       >
                         ↑
                       </button>
@@ -648,11 +733,56 @@ function BookStudio() {
                         onClick={() => move(index, 1)}
                         disabled={index === photos.length - 1}
                         aria-label="Déplacer après"
-                        className="rounded-full border border-input px-3 py-1.5 text-sm transition-colors hover:bg-muted disabled:opacity-40"
+                        className="size-11 rounded-full border border-input text-sm transition-colors hover:bg-muted disabled:opacity-40"
                       >
                         ↓
                       </button>
                     </span>
+                  </div>
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <input
+                      type="text"
+                      value={moods[photo.id] ?? ""}
+                      maxLength={60}
+                      placeholder="Ambiance (paisible, festif…)"
+                      onChange={(event) =>
+                        setMoods((current) => ({ ...current, [photo.id]: event.target.value }))
+                      }
+                      onBlur={() =>
+                        void savePhotoMeta({
+                          data: { photoId: photo.id, mood: moods[photo.id] ?? null },
+                        }).catch(() => undefined)
+                      }
+                      className="rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    {(photo.face_count ?? 0) > 0 ? (
+                      <input
+                        type="text"
+                        value={peoples[photo.id] ?? ""}
+                        maxLength={300}
+                        placeholder={
+                          photo.face_count === 1
+                            ? "Qui est sur la photo ?"
+                            : photo.face_count + " personnes — leurs noms, séparés par une virgule"
+                        }
+                        onChange={(event) =>
+                          setPeoples((current) => ({ ...current, [photo.id]: event.target.value }))
+                        }
+                        onBlur={() =>
+                          void savePhotoMeta({
+                            data: {
+                              photoId: photo.id,
+                              people: (peoples[photo.id] ?? "")
+                                .split(",")
+                                .map((name) => name.trim())
+                                .filter(Boolean),
+                            },
+                          }).catch(() => undefined)
+                        }
+                        className="rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    ) : null}
                   </div>
 
                   {openFramer === photo.id ? (

@@ -18,6 +18,9 @@ export interface DatedPhoto {
   file: File;
   takenAt: Date;
   source: DateSource;
+  /** Coordonnées GPS de l'EXIF, quand l'appareil les a enregistrées. */
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export interface PhotoGroup {

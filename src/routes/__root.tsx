@@ -172,14 +172,19 @@ function Header() {
 
   return (
     <nav className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-border">
-      <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-        <Link to="/" className="font-serif text-2xl tracking-tight text-foreground">
+      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
+        <Link
+          to="/"
+          className="shrink-0 font-serif text-xl tracking-tight text-foreground sm:text-2xl"
+        >
           Anthologie
         </Link>
-        <div className="flex items-center gap-8">
+        {/* Barre défilante : sur un téléphone, quatre liens et un bouton ne
+            tiennent pas côte à côte sans écraser le logo. */}
+        <div className="flex items-center gap-4 overflow-x-auto whitespace-nowrap sm:gap-8">
           <Link
             to="/"
-            className="text-sm font-medium text-foreground/70 hover:text-foreground transition-colors"
+            className="hidden text-sm font-medium text-foreground/70 transition-colors hover:text-foreground sm:inline"
           >
             Accueil
           </Link>
@@ -200,7 +205,7 @@ function Header() {
           {loading ? null : user ? (
             <Link
               to="/albums/import"
-              className="rounded-full bg-terre px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-terre/90"
+              className="shrink-0 rounded-full bg-terre px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-terre/90"
             >
               Importer
             </Link>

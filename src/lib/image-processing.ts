@@ -7,7 +7,32 @@
  * de la téléverser.
  */
 
-const MAX_DIMENSION = 2048;
+/**
+ * Définition d'envoi, selon la connexion.
+ *
+ * 2048 px plafonnaient la qualité d'impression : à peine 170 dpi sur un livre
+ * 30×30, soit un rendu mou. 3200 px donnent 265 dpi au même format, largement
+ * acceptable. Mais c'est aussi trois fois le poids — intenable sur une 3G
+ * ivoirienne ou en mode économie de données, où l'on garde 2048.
+ */
+const MAX_DIMENSION_FAST = 3200;
+const MAX_DIMENSION_SLOW = 2048;
+
+interface NetworkInformation {
+  effectiveType?: string;
+  saveData?: boolean;
+}
+
+/** Plafond adapté à la connexion courante. */
+export function uploadDimension(): number {
+  const connection = (navigator as Navigator & { connection?: NetworkInformation }).connection;
+  if (!connection) return MAX_DIMENSION_FAST;
+
+  if (connection.saveData) return MAX_DIMENSION_SLOW;
+  const type = connection.effectiveType ?? "";
+  if (type === "slow-2g" || type === "2g" || type === "3g") return MAX_DIMENSION_SLOW;
+  return MAX_DIMENSION_FAST;
+}
 const JPEG_QUALITY = 0.82;
 const THUMBNAIL_DIMENSION = 320;
 const THUMBNAIL_QUALITY = 0.7;
@@ -82,7 +107,7 @@ export async function processForUpload(file: File): Promise<ProcessedImage> {
   }
 
   try {
-    const { width, height } = scaledSize(bitmap.width, bitmap.height, MAX_DIMENSION);
+    const { width, height } = scaledSize(bitmap.width, bitmap.height, uploadDimension());
     const blob = await toBlob(draw(bitmap, width, height), JPEG_QUALITY);
 
     // Une photo déjà petite ou déjà bien compressée ne gagne rien à être

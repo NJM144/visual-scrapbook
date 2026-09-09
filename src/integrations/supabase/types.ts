@@ -23,6 +23,7 @@ export type Database = {
           created_at: string
           description: string | null
           id: string
+          layout: Json | null
           page_format: string
           theme: string
           title: string
@@ -37,6 +38,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          layout?: Json | null
           page_format?: string
           theme?: string
           title: string
@@ -51,6 +53,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          layout?: Json | null
           page_format?: string
           theme?: string
           title?: string
@@ -76,10 +79,17 @@ export type Database = {
           crop_x: number
           crop_y: number
           crop_zoom: number
+          face_count: number | null
           fit: string
           id: string
+          latitude: number | null
+          longitude: number | null
+          mood: string | null
           order_index: number
+          people: string[]
+          place: string | null
           storage_path: string
+          taken_at: string | null
           url: string
           user_id: string
         }
@@ -91,10 +101,17 @@ export type Database = {
           crop_x?: number
           crop_y?: number
           crop_zoom?: number
+          face_count?: number | null
           fit?: string
           id?: string
+          latitude?: number | null
+          longitude?: number | null
+          mood?: string | null
           order_index?: number
+          people?: string[]
+          place?: string | null
           storage_path: string
+          taken_at?: string | null
           url: string
           user_id: string
         }
@@ -106,10 +123,17 @@ export type Database = {
           crop_x?: number
           crop_y?: number
           crop_zoom?: number
+          face_count?: number | null
           fit?: string
           id?: string
+          latitude?: number | null
+          longitude?: number | null
+          mood?: string | null
           order_index?: number
+          people?: string[]
+          place?: string | null
           storage_path?: string
+          taken_at?: string | null
           url?: string
           user_id?: string
         }

@@ -73,10 +73,19 @@ function clamp01(value: unknown, fallback: number): number {
 }
 
 const PHOTO_PROMPT =
-  "Analyse cette photo pour un album imprimé. Réponds UNIQUEMENT par du JSON : " +
-  '{"legende": "<=80 caracteres, francais, factuel>", "focusX": <0-1>, "focusY": <0-1>, ' +
-  '"entiere": <true|false>}. focusX/focusY = position du sujet principal, ' +
-  "0 = bord gauche/haut. entiere = true si un recadrage couperait le sujet.";
+  "Tu écris pour un album photo souvenir. Réponds UNIQUEMENT par du JSON : " +
+  '{"legende": "...", "ambiance": "...", "focusX": <0-1>, "focusY": <0-1>, ' +
+  '"entiere": <true|false>, "visages": <entier>}. ' +
+  // Le premier jet du modèle était un inventaire — « étui de violon bleu
+  // ouvert, instrument visible ». Exact, et sans intérêt dans un livre
+  // souvenir : on lui demande explicitement le ressenti, pas le catalogue.
+  "legende : 70 caracteres maximum, en francais. Evoque le moment et ce qu'on " +
+  "ressent, PAS un inventaire de ce qui est visible. Pas de point final. " +
+  "ambiance : deux ou trois mots donnant l'atmosphere (par exemple : paisible, " +
+  "festif, intime, solennel). " +
+  "focusX/focusY : position du sujet principal, 0 = bord gauche/haut. " +
+  "entiere : true si un recadrage couperait le sujet. " +
+  "visages : nombre de personnes dont le visage est visible, 0 si aucune.";
 
 export const describePhotoAI = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -105,12 +114,16 @@ export const describePhotoAI = createServerFn({ method: "POST" })
 
     const parsed = extractJson(text) as Record<string, unknown>;
     const caption = typeof parsed["legende"] === "string" ? parsed["legende"].trim() : "";
+    const mood = typeof parsed["ambiance"] === "string" ? parsed["ambiance"].trim() : "";
+    const faces = Number(parsed["visages"]);
 
     return {
       caption: caption.slice(0, 120),
+      mood: mood.slice(0, 60),
       focusX: clamp01(parsed["focusX"], 0.5),
       focusY: clamp01(parsed["focusY"], 0.5),
       wholeImage: parsed["entiere"] === true,
+      faceCount: Number.isFinite(faces) ? Math.min(100, Math.max(0, Math.round(faces))) : 0,
     };
   });
 

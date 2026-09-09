@@ -192,3 +192,103 @@ export function planBook(
     photoCount,
   };
 }
+
+/* ------------------------------------------------- disposition manuelle */
+
+/**
+ * Disposition décidée par l'auteur, telle qu'elle est stockée sur l'album.
+ *
+ * Une case vide (`null`) est volontaire : une page à moitié remplie est une
+ * intention de mise en page, pas une erreur à combler.
+ */
+export interface AlbumLayout {
+  pages: { id: string; slots: (string | null)[] }[];
+}
+
+/** Nombre maximal de photos sur une même page. Au-delà, plus rien n'est lisible. */
+export const MAX_SLOTS_PER_PAGE = 4;
+
+export function isAlbumLayout(value: unknown): value is AlbumLayout {
+  if (!value || typeof value !== "object") return false;
+  const pages = (value as AlbumLayout).pages;
+  if (!Array.isArray(pages)) return false;
+
+  return pages.every(
+    (page) =>
+      page &&
+      typeof page.id === "string" &&
+      Array.isArray(page.slots) &&
+      page.slots.length >= 1 &&
+      page.slots.length <= MAX_SLOTS_PER_PAGE &&
+      page.slots.every((slot) => slot === null || typeof slot === "string"),
+  );
+}
+
+/** Construit une disposition modifiable à partir du découpage automatique. */
+export function layoutFromPlan(plan: BookPlan, photoIds: string[]): AlbumLayout {
+  return {
+    pages: plan.pages
+      .filter((page) => page.kind === "photos")
+      .map((page, index) => ({
+        id: "p" + index + "-" + page.number,
+        slots: page.slots.map((slot) => photoIds[slot.photoIndex] ?? null),
+      })),
+  };
+}
+
+/**
+ * Compose le livre à partir d'une disposition manuelle.
+ *
+ * Même géométrie que le mode automatique : seul le regroupement change. Les
+ * photos absentes de la disposition — ajoutées après coup — sont ajoutées à la
+ * suite, faute de quoi elles disparaîtraient du livre sans prévenir.
+ */
+export function planFromLayout(
+  layout: AlbumLayout,
+  photoIds: string[],
+  aspects: number[],
+  formatId: string | null | undefined,
+  theme: BookTheme,
+): BookPlan {
+  const format = findFormat(formatId);
+  const margin = theme.photoMarginMm;
+  const boxW = format.widthMm - margin * 2;
+  const boxH = format.heightMm - margin * 2;
+
+  const indexById = new Map(photoIds.map((id, index) => [id, index]));
+  const used = new Set<string>();
+  const pages: BookPage[] = [{ kind: "titre", number: 1, slots: [] }];
+
+  const addPage = (ids: (string | null)[]) => {
+    const count = Math.max(1, Math.min(MAX_SLOTS_PER_PAGE, ids.length));
+    const bias = portraitMajority(
+      ids.map((id) => (id ? (aspects[indexById.get(id) ?? -1] ?? 0) : 0)).filter((a) => a > 0),
+    );
+
+    const slots = buildSlots(margin, margin, boxW, boxH, count, bias).map((slot, position) => ({
+      ...slot,
+      photoIndex: indexById.get(ids[position] ?? "") ?? -1,
+    }));
+
+    pages.push({ kind: "photos", number: pages.length + 1, slots });
+  };
+
+  for (const page of layout.pages) {
+    const ids = page.slots.map((id) => (id && indexById.has(id) ? id : null));
+    for (const id of ids) if (id) used.add(id);
+    addPage(ids);
+  }
+
+  const orphans = photoIds.filter((id) => !used.has(id));
+  for (let i = 0; i < orphans.length; i += 1) addPage([orphans[i] ?? null]);
+
+  pages.push({ kind: "colophon", number: pages.length + 1, slots: [] });
+
+  const usedPages = pages.length;
+  const total = normalizePageCount(usedPages);
+  for (let n = usedPages; n < total; n += 1) {
+    pages.push({ kind: "blanche", number: n + 1, slots: [] });
+  }
+
+  return { format, pages, usedPages, paddingPages: total - usedPages, photoCount: photoIds.length };
+}

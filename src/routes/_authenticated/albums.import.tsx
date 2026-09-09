@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { createAlbum, createPhoto } from "@/lib/albums.functions";
-import { resolvePhotoDate } from "@/lib/exif";
+import { readExifMetadata } from "@/lib/exif";
 import {
   dateBounds,
   filterByDateRange,
@@ -109,8 +109,19 @@ function ImportPage() {
       const file = files[index];
       if (!file) continue;
 
-      const { takenAt, source } = await resolvePhotoDate(file);
-      dated.push({ id: index + "-" + file.size + "-" + file.name, file, takenAt, source });
+      // Une seule lecture d'en-tête pour la date et les coordonnées : les lire
+      // séparément doublerait le travail sur des centaines de fichiers.
+      const meta = await readExifMetadata(file);
+      const takenAt = meta.takenAt ?? new Date(file.lastModified || Date.now());
+
+      dated.push({
+        id: index + "-" + file.size + "-" + file.name,
+        file,
+        takenAt,
+        source: meta.takenAt ? "exif" : "file",
+        latitude: meta.latitude,
+        longitude: meta.longitude,
+      });
       if (index % 8 === 0 || index === files.length - 1) setAnalyzed(index + 1);
     }
 
@@ -163,7 +174,17 @@ function ImportPage() {
             .upload(path, processed.blob, { contentType: processed.blob.type || "image/jpeg" });
           if (uploadError) throw uploadError;
 
-          await addPhoto({ data: { albumId, storagePath: path, orderIndex: index } });
+          await addPhoto({
+            data: {
+              albumId,
+              storagePath: path,
+              orderIndex: index,
+              takenAt: photo.takenAt.toISOString(),
+              ...(photo.latitude !== null && photo.longitude !== null
+                ? { latitude: photo.latitude, longitude: photo.longitude }
+                : {}),
+            },
+          });
         } catch {
           failed += 1;
         } finally {
