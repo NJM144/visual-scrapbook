@@ -463,7 +463,7 @@ function ImportPage() {
               )}
             </section>
 
-            <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-4 rounded-full border border-border bg-card/95 px-6 py-4 shadow-lg backdrop-blur">
+            <div className="sticky bottom-4 z-10 flex flex-col items-stretch gap-3 rounded-3xl border border-border bg-card/95 px-5 py-4 text-center shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:rounded-full sm:px-6 sm:text-left">
               <p className="text-sm text-foreground">
                 <span className="font-medium">{kept.length}</span> album
                 {kept.length > 1 ? "s" : ""} · <span className="font-medium">{keptPhotoCount}</span>{" "}
@@ -473,7 +473,7 @@ function ImportPage() {
                 type="button"
                 disabled={kept.length === 0}
                 onClick={startImport}
-                className="inline-flex items-center justify-center rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                className="inline-flex w-full items-center justify-center rounded-full bg-primary px-6 py-3.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 sm:w-auto"
               >
                 Créer les albums
               </button>

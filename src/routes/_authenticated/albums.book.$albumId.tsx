@@ -740,7 +740,7 @@ function BookStudio() {
             <ol className="space-y-3">
               {photos.map((photo, index) => (
                 <li key={photo.id} className="rounded-2xl border border-border bg-card p-3">
-                  <div className="flex flex-wrap items-center gap-4">
+                  <div className="flex flex-wrap items-center gap-3 sm:gap-4">
                     <span className="w-6 shrink-0 text-center text-sm text-muted-foreground">
                       {index + 1}
                     </span>
@@ -759,9 +759,9 @@ function BookStudio() {
                         setCaptions((current) => ({ ...current, [photo.id]: event.target.value }))
                       }
                       onBlur={() => void commitCaption(photo.id)}
-                      className="min-w-[12rem] flex-1 rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                      className="min-w-0 flex-1 basis-full rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-ring sm:basis-auto"
                     />
-                    <span className="flex shrink-0 gap-1">
+                    <span className="flex w-full shrink-0 justify-end gap-2 sm:w-auto sm:gap-1">
                       <button
                         type="button"
                         onClick={() => setOpenFramer(openFramer === photo.id ? null : photo.id)}
@@ -962,14 +962,14 @@ function BookStudio() {
                   La composition. Le thème, lui, en donne les couleurs — les deux se combinent
                   librement.
                 </p>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:snap-none sm:gap-3 sm:overflow-visible sm:px-0 sm:grid-cols-3 lg:grid-cols-4">
                   {COVER_TEMPLATES.map((option) => (
                     <button
                       key={option.id}
                       type="button"
                       onClick={() => setCoverTemplateId(option.id)}
                       className={
-                        "rounded-2xl border p-3 text-left transition-colors " +
+                        "w-40 shrink-0 snap-start rounded-2xl border p-3 text-left transition-colors sm:w-auto " +
                         (coverTemplateId === option.id
                           ? "border-terre bg-terre/5 ring-2 ring-terre/30"
                           : "border-border hover:bg-muted")
@@ -983,9 +983,13 @@ function BookStudio() {
                           subtitle=""
                           photoUrl={coverPhoto?.signedUrl}
                           templateId={option.id}
+                          compact
                         />
                       </span>
-                      <span className="mt-1 block text-xs leading-snug text-muted-foreground">
+                      <span className="mt-2 block text-sm font-medium text-foreground">
+                        {option.label}
+                      </span>
+                      <span className="mt-0.5 hidden text-xs leading-snug text-muted-foreground sm:block">
                         {option.description}
                       </span>
                     </button>
@@ -998,7 +1002,7 @@ function BookStudio() {
                 <p className="mb-5 text-sm text-muted-foreground">
                   Papier, encre, typographie et motif de couverture.
                 </p>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:snap-none sm:gap-3 sm:overflow-visible sm:px-0 sm:grid-cols-3 lg:grid-cols-5">
                   {BOOK_THEMES.map((option) => (
                     <button
                       key={option.id}
@@ -1006,7 +1010,7 @@ function BookStudio() {
                       onClick={() => setThemeId(option.id)}
                       title={option.description}
                       className={
-                        "overflow-hidden rounded-2xl border text-left transition-colors " +
+                        "w-32 shrink-0 snap-start overflow-hidden rounded-2xl border text-left transition-colors sm:w-auto " +
                         (themeId === option.id
                           ? "border-terre ring-2 ring-terre/40"
                           : "border-border hover:border-foreground/30")
@@ -1045,7 +1049,7 @@ function BookStudio() {
                       type="button"
                       onClick={() => setFormatId(option.id)}
                       className={
-                        "rounded-2xl border p-4 text-left transition-colors " +
+                        "min-h-[5.5rem] rounded-2xl border p-4 text-left transition-colors " +
                         (formatId === option.id
                           ? "border-terre bg-terre/5"
                           : "border-border hover:bg-muted")

@@ -111,7 +111,7 @@ function AlbumDetailPage() {
           ← Mes albums
         </Link>
 
-        <div className="mt-6 flex flex-wrap items-end justify-between gap-6">
+        <div className="mt-6 flex flex-col gap-5 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
           <div className="max-w-[52ch]">
             <h1 className="font-serif text-4xl text-foreground">
               {albumQuery.data?.title ??
@@ -126,7 +126,7 @@ function AlbumDetailPage() {
               {photos.length} photographie{photos.length > 1 ? "s" : ""}
             </p>
           </div>
-          <div className="flex flex-wrap gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap">
             <input
               ref={inputRef}
               type="file"

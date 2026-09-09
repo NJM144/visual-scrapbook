@@ -21,7 +21,7 @@ function AdminPage() {
   });
 
   return (
-    <div className="px-6 py-16">
+    <div className="px-4 py-10 sm:px-6 sm:py-16">
       <div className="mx-auto max-w-6xl">
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-[0.18em] text-terre">
           Administration
@@ -52,7 +52,7 @@ function AdminPage() {
               Aucun album pour l’instant.
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-2xl border border-border">
+            <div className="hidden overflow-x-auto rounded-2xl border border-border sm:block">
               <table className="w-full min-w-[42rem] text-sm">
                 <thead className="bg-muted/60 text-left">
                   <tr>
@@ -98,6 +98,33 @@ function AdminPage() {
               </table>
             </div>
           )}
+
+          {data && data.length > 0 ? (
+            <ul className="space-y-3 sm:hidden">
+              {data.map((album) => (
+                <li key={album.id} className="rounded-2xl border border-border bg-card p-4">
+                  <p className="font-medium text-foreground">{album.title}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {album.photo_count} photo{album.photo_count > 1 ? "s" : ""} ·{" "}
+                    {new Date(album.created_at).toLocaleDateString("fr-FR")}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {findTheme(album.theme).label} · {findFormat(album.page_format).label}
+                  </p>
+                  <p className="mt-1 font-mono text-xs text-muted-foreground/70">
+                    {album.user_id.slice(0, 8)}…
+                  </p>
+                  <Link
+                    to="/albums/book/$albumId"
+                    params={{ albumId: album.id }}
+                    className="mt-4 flex w-full items-center justify-center rounded-full bg-terre px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-terre/90"
+                  >
+                    Exporter
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </div>
     </div>

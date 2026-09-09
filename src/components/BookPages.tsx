@@ -39,9 +39,9 @@ export function BookPages({
   const { format } = plan;
 
   return (
-    <div className="grid gap-6 sm:grid-cols-2">
+    <div className="-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-3 sm:mx-0 sm:grid sm:snap-none sm:grid-cols-2 sm:gap-6 sm:overflow-visible sm:px-0">
       {plan.pages.map((page) => (
-        <figure key={page.number}>
+        <figure key={page.number} className="w-[78vw] shrink-0 snap-center sm:w-auto">
           <div
             className="relative overflow-hidden shadow-md ring-1 ring-black/10"
             style={{

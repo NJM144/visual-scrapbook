@@ -23,6 +23,7 @@ export function CoverPreview({
   subtitle,
   photoUrl,
   templateId,
+  compact = false,
 }: {
   theme: BookTheme;
   format: PrintFormat;
@@ -30,6 +31,8 @@ export function CoverPreview({
   subtitle: string;
   photoUrl?: string | undefined;
   templateId?: string | undefined;
+  /** Dans un sélecteur, la légende sous la vignette n'est que du bruit. */
+  compact?: boolean;
 }) {
   const template = findCoverTemplate(templateId);
   const motif = resolveMotif(template, theme);
@@ -64,9 +67,11 @@ export function CoverPreview({
         />
       </div>
 
-      <figcaption className="mt-3 text-center text-xs text-muted-foreground">
-        {template.label} · {theme.label} · {format.label}
-      </figcaption>
+      {compact ? null : (
+        <figcaption className="mt-3 text-center text-xs text-muted-foreground">
+          {template.label} · {theme.label} · {format.label}
+        </figcaption>
+      )}
     </figure>
   );
 }
