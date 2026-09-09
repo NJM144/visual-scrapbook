@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import type { Album, AlbumPreview, PhotoWithSignedUrl } from "./albums";
+import type { AdminAlbumRow, Album, AlbumPreview, PhotoWithSignedUrl } from "./albums";
 
 export const getAlbums = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -246,4 +246,140 @@ export const getAlbumsWithPreview = createServerFn({ method: "GET" })
         cover_url: coverPath ? (signedByPath.get(coverPath) ?? null) : null,
       };
     });
+  });
+
+/* ------------------------------------------------------- livre imprimable */
+
+/** Enregistre les réglages d'impression : thème, format, textes de couverture. */
+export const updateAlbumBook = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data) =>
+    z
+      .object({
+        albumId: z.string().uuid(),
+        theme: z.string().min(1).max(40),
+        pageFormat: z.string().min(1).max(40),
+        coverTitle: z.string().max(120).nullable().optional(),
+        coverSubtitle: z.string().max(160).nullable().optional(),
+        coverPhotoId: z.string().uuid().nullable().optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ context, data }): Promise<Album> => {
+    const { data: album, error } = await context.supabase
+      .from("albums")
+      .update({
+        theme: data.theme,
+        page_format: data.pageFormat,
+        cover_title: data.coverTitle ?? null,
+        cover_subtitle: data.coverSubtitle ?? null,
+        cover_photo_id: data.coverPhotoId ?? null,
+      })
+      .eq("id", data.albumId)
+      .eq("user_id", context.userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return album;
+  });
+
+/** Le compte courant a-t-il le rôle administrateur ? */
+export const getIsAdmin = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<boolean> => {
+    const { data, error } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId)
+      .eq("role", "admin")
+      .maybeSingle();
+
+    if (error) return false;
+    return Boolean(data);
+  });
+
+/**
+ * Album destiné à l'export, sans filtrer sur le propriétaire.
+ *
+ * Le filtrage est laissé à la RLS, qui autorise le propriétaire *ou* un
+ * administrateur. Refiltrer ici sur user_id empêcherait justement l'admin de
+ * préparer les fichiers d'un client.
+ */
+export const getAlbumForExport = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data) => z.object({ albumId: z.string().uuid() }).parse(data))
+  .handler(async ({ context, data }): Promise<Album> => {
+    const { data: album, error } = await context.supabase
+      .from("albums")
+      .select("*")
+      .eq("id", data.albumId)
+      .single();
+
+    if (error || !album) throw new Error("Album introuvable");
+    return album;
+  });
+
+/** Photos d'un album pour l'export, avec URL signées. Même règle RLS. */
+export const getPhotosForExport = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data) => z.object({ albumId: z.string().uuid() }).parse(data))
+  .handler(async ({ context, data }): Promise<PhotoWithSignedUrl[]> => {
+    const { data: photos, error } = await context.supabase
+      .from("photos")
+      .select("*")
+      .eq("album_id", data.albumId)
+      .order("order_index", { ascending: true })
+      .order("created_at", { ascending: true });
+
+    if (error) throw error;
+    if (!photos || photos.length === 0) return [];
+
+    // Une seule requête de signature : un livre peut compter cent photos, et
+    // les signer une par une multiplierait les allers-retours d'autant.
+    const { data: signed } = await context.supabase.storage.from("photos").createSignedUrls(
+      photos.map((photo) => photo.storage_path),
+      60 * 60 * 6,
+    );
+
+    const byPath = new Map<string, string>();
+    for (const entry of signed ?? []) {
+      if (entry.path && entry.signedUrl) byPath.set(entry.path, entry.signedUrl);
+    }
+
+    return photos.map((photo) => ({
+      ...photo,
+      signedUrl: byPath.get(photo.storage_path) ?? "",
+    }));
+  });
+
+/** Tous les albums, tous comptes confondus. Réservé à l'administrateur. */
+export const getAllAlbumsForAdmin = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<AdminAlbumRow[]> => {
+    const { data: isAdmin } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId)
+      .eq("role", "admin")
+      .maybeSingle();
+
+    if (!isAdmin) throw new Error("Accès réservé aux administrateurs.");
+
+    const { data: albums, error } = await context.supabase
+      .from("albums")
+      .select("id, user_id, title, created_at, theme, page_format")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    if (!albums || albums.length === 0) return [];
+
+    const { data: photos } = await context.supabase.from("photos").select("album_id");
+
+    const counts = new Map<string, number>();
+    for (const photo of photos ?? []) {
+      counts.set(photo.album_id, (counts.get(photo.album_id) ?? 0) + 1);
+    }
+
+    return albums.map((album) => ({ ...album, photo_count: counts.get(album.id) ?? 0 }));
   });

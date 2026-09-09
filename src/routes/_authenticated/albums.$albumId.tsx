@@ -10,9 +10,15 @@ export const Route = createFileRoute("/_authenticated/albums/$albumId")({
   head: () => ({
     meta: [
       { title: "Album — Anthologie" },
-      { name: "description", content: "Consultez les photographies de votre album et ajoutez-en de nouvelles." },
+      {
+        name: "description",
+        content: "Consultez les photographies de votre album et ajoutez-en de nouvelles.",
+      },
       { property: "og:title", content: "Album — Anthologie" },
-      { property: "og:description", content: "Consultez les photographies de votre album et ajoutez-en de nouvelles." },
+      {
+        property: "og:description",
+        content: "Consultez les photographies de votre album et ajoutez-en de nouvelles.",
+      },
     ],
   }),
   component: AlbumDetailPage,
@@ -94,14 +100,18 @@ function AlbumDetailPage() {
   return (
     <div className="px-6 py-16">
       <div className="mx-auto max-w-6xl">
-        <Link to="/albums" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
+        <Link
+          to="/albums"
+          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
           ← Mes albums
         </Link>
 
         <div className="mt-6 flex flex-wrap items-end justify-between gap-6">
           <div className="max-w-[52ch]">
             <h1 className="font-serif text-4xl text-foreground">
-              {albumQuery.data?.title ?? (albumQuery.isLoading ? "Chargement…" : "Album introuvable")}
+              {albumQuery.data?.title ??
+                (albumQuery.isLoading ? "Chargement…" : "Album introuvable")}
             </h1>
             {albumQuery.data?.description ? (
               <p className="mt-3 text-sm leading-relaxed text-foreground/70">
@@ -129,6 +139,13 @@ function AlbumDetailPage() {
             >
               {uploading ? "Envoi…" : "Ajouter des photos"}
             </button>
+            <Link
+              to="/albums/book/$albumId"
+              params={{ albumId }}
+              className="inline-flex items-center justify-center rounded-full bg-terre px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-terre/90"
+            >
+              Livre imprimable
+            </Link>
             <button
               type="button"
               onClick={handleDeleteAlbum}

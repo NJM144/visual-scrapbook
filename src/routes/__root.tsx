@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import {
   Outlet,
   Link,
@@ -8,12 +8,14 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { useAuth } from "@/hooks/use-auth";
 import { CREDITS } from "@/lib/gallery";
+import { getIsAdmin } from "@/lib/albums.functions";
 
 function NotFoundComponent() {
   return (
@@ -156,6 +158,17 @@ function RootComponent() {
 
 function Header() {
   const { user, loading } = useAuth();
+  const fetchIsAdmin = useServerFn(getIsAdmin);
+
+  // La requête n'a de sens qu'une fois la session connue : appelée sans
+  // session, la fonction serveur répondrait par une erreur d'authentification.
+  const { data: isAdmin } = useQuery({
+    queryKey: ["is-admin"],
+    queryFn: () => fetchIsAdmin(),
+    enabled: Boolean(user),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
 
   return (
     <nav className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-border">
@@ -176,6 +189,14 @@ function Header() {
           >
             Albums
           </Link>
+          {isAdmin ? (
+            <Link
+              to="/admin"
+              className="text-sm font-medium text-foreground/70 transition-colors hover:text-foreground"
+            >
+              Administration
+            </Link>
+          ) : null}
           {loading ? null : user ? (
             <Link
               to="/albums/import"
