@@ -383,3 +383,60 @@ export const getAllAlbumsForAdmin = createServerFn({ method: "GET" })
 
     return albums.map((album) => ({ ...album, photo_count: counts.get(album.id) ?? 0 }));
   });
+
+/** Légende d'une photo, imprimée sous l'image dans le livre. */
+export const updatePhotoCaption = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data) =>
+    z
+      .object({
+        photoId: z.string().uuid(),
+        caption: z.string().max(300).nullable(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ context, data }) => {
+    const { error } = await context.supabase
+      .from("photos")
+      .update({ caption: data.caption?.trim() || null })
+      .eq("id", data.photoId)
+      .eq("user_id", context.userId);
+
+    if (error) throw error;
+    return { success: true };
+  });
+
+/**
+ * Réordonne les photos d'un album.
+ *
+ * On reçoit la liste complète des identifiants dans l'ordre voulu et on
+ * réécrit chaque order_index. Envoyer seulement les positions déplacées
+ * laisserait des rangs en double dès qu'une photo est insérée entre deux
+ * autres.
+ */
+export const reorderPhotos = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data) =>
+    z
+      .object({
+        albumId: z.string().uuid(),
+        photoIds: z.array(z.string().uuid()).min(1).max(500),
+      })
+      .parse(data),
+  )
+  .handler(async ({ context, data }) => {
+    for (let index = 0; index < data.photoIds.length; index += 1) {
+      const photoId = data.photoIds[index];
+      if (!photoId) continue;
+
+      const { error } = await context.supabase
+        .from("photos")
+        .update({ order_index: index })
+        .eq("id", photoId)
+        .eq("album_id", data.albumId)
+        .eq("user_id", context.userId);
+
+      if (error) throw error;
+    }
+    return { success: true };
+  });

@@ -144,7 +144,7 @@ function AlbumDetailPage() {
               params={{ albumId }}
               className="inline-flex items-center justify-center rounded-full bg-terre px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-terre/90"
             >
-              Livre imprimable
+              Voir mon livre
             </Link>
             <button
               type="button"

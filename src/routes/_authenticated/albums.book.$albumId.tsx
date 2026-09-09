@@ -1,29 +1,43 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { getAlbumForExport, getPhotosForExport, updateAlbumBook } from "@/lib/albums.functions";
+import {
+  getAlbumForExport,
+  getIsAdmin,
+  getPhotosForExport,
+  reorderPhotos,
+  updateAlbumBook,
+  updatePhotoCaption,
+} from "@/lib/albums.functions";
 import { BOOK_THEMES, findTheme } from "@/lib/book-themes";
 import { PRINT_FORMATS, findFormat, spineWidthMm, effectiveDpi } from "@/lib/print-formats";
 import { planBook } from "@/lib/book-layout";
 import { CoverPreview } from "@/components/CoverPreview";
+import { BookPages } from "@/components/BookPages";
 
 export const Route = createFileRoute("/_authenticated/albums/book/$albumId")({
   head: () => ({
     meta: [
-      { title: "Livre imprimable — Anthologie" },
+      { title: "Mon livre — Anthologie" },
       {
         name: "description",
-        content:
-          "Choisissez un thème, un format, décorez la couverture et exportez pour l’imprimerie.",
+        content: "Feuilletez votre album, disposez les photos, ajoutez des légendes.",
       },
     ],
   }),
   component: BookStudio,
 });
 
-/** Déclenche le téléchargement d'un fichier généré en mémoire. */
+type Tab = "apercu" | "mise-en-page" | "apparence";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "apercu", label: "Feuilleter" },
+  { id: "mise-en-page", label: "Disposer les photos" },
+  { id: "apparence", label: "Thème et format" },
+];
+
 function download(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -32,7 +46,6 @@ function download(blob: Blob, filename: string) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  // Laisse au navigateur le temps de démarrer le téléchargement.
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
@@ -49,9 +62,13 @@ function slugify(value: string): string {
 
 function BookStudio() {
   const { albumId } = Route.useParams();
+  const queryClient = useQueryClient();
   const fetchAlbum = useServerFn(getAlbumForExport);
   const fetchPhotos = useServerFn(getPhotosForExport);
+  const fetchIsAdmin = useServerFn(getIsAdmin);
   const saveBook = useServerFn(updateAlbumBook);
+  const saveCaption = useServerFn(updatePhotoCaption);
+  const saveOrder = useServerFn(reorderPhotos);
 
   const albumQuery = useQuery({
     queryKey: ["album-export", albumId],
@@ -61,19 +78,31 @@ function BookStudio() {
     queryKey: ["photos-export", albumId],
     queryFn: () => fetchPhotos({ data: { albumId } }),
   });
+  const { data: isAdmin } = useQuery({
+    queryKey: ["is-admin"],
+    queryFn: () => fetchIsAdmin(),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
 
+  const [tab, setTab] = useState<Tab>("apercu");
   const [themeId, setThemeId] = useState("savane");
   const [formatId, setFormatId] = useState("carre_20");
   const [coverTitle, setCoverTitle] = useState("");
   const [coverSubtitle, setCoverSubtitle] = useState("");
   const [coverPhotoId, setCoverPhotoId] = useState<string | null>(null);
+
+  /** Ordre en cours d'édition, pas encore enregistré. */
+  const [order, setOrder] = useState<string[]>([]);
+  const [captions, setCaptions] = useState<Record<string, string>>({});
+  const [orderDirty, setOrderDirty] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(
     null,
   );
 
-  // Les réglages enregistrés deviennent l'état initial du formulaire.
   const album = albumQuery.data;
   useEffect(() => {
     if (!album) return;
@@ -84,21 +113,65 @@ function BookStudio() {
     setCoverPhotoId(album.cover_photo_id);
   }, [album]);
 
-  const photos = photosQuery.data ?? [];
+  const rawPhotos = useMemo(() => photosQuery.data ?? [], [photosQuery.data]);
+  useEffect(() => {
+    setOrder(rawPhotos.map((photo) => photo.id));
+    setCaptions(Object.fromEntries(rawPhotos.map((photo) => [photo.id, photo.caption ?? ""])));
+    setOrderDirty(false);
+  }, [rawPhotos]);
+
+  // Les photos dans l'ordre affiché, légendes en cours d'édition comprises :
+  // l'aperçu doit refléter ce qu'on vient de taper, pas ce qu'il y a en base.
+  const photos = useMemo(() => {
+    const byId = new Map(rawPhotos.map((photo) => [photo.id, photo]));
+    return order
+      .map((id) => byId.get(id))
+      .filter((photo): photo is (typeof rawPhotos)[number] => Boolean(photo))
+      .map((photo) => ({ ...photo, caption: captions[photo.id] ?? photo.caption }));
+  }, [order, rawPhotos, captions]);
+
   const theme = findTheme(themeId);
   const format = findFormat(formatId);
-
   const plan = useMemo(
     () => planBook(photos.length, formatId, theme),
     [photos.length, formatId, theme],
   );
-
   const spine = spineWidthMm(plan.pages.length, true);
-  const coverPhoto = photos.find((p) => p.id === coverPhotoId) ?? photos[0];
-
-  // Une photo réduite à 2048 px suffit jusqu'à ~17 cm de large ; au-delà,
-  // l'imprimeur travaillera avec moins de 300 dpi. Autant le dire avant.
+  const coverPhoto = photos.find((photo) => photo.id === coverPhotoId) ?? photos[0];
   const coverDpi = effectiveDpi(2048, format.widthMm);
+  const title = coverTitle.trim() || album?.title || "Album";
+  const dateLabel = new Date(album?.created_at ?? Date.now()).toLocaleDateString("fr-FR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
+  const move = (index: number, delta: number) => {
+    setOrder((current) => {
+      const target = index + delta;
+      if (target < 0 || target >= current.length) return current;
+
+      const next = [...current];
+      const [moved] = next.splice(index, 1);
+      if (!moved) return current;
+      next.splice(target, 0, moved);
+      return next;
+    });
+    setOrderDirty(true);
+  };
+
+  const commitCaption = async (photoId: string) => {
+    const value = captions[photoId] ?? "";
+    const original = rawPhotos.find((photo) => photo.id === photoId)?.caption ?? "";
+    if (value.trim() === original.trim()) return;
+
+    try {
+      await saveCaption({ data: { photoId, caption: value.trim() || null } });
+      await queryClient.invalidateQueries({ queryKey: ["photos-export", albumId] });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Légende non enregistrée");
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -113,7 +186,12 @@ function BookStudio() {
           coverPhotoId,
         },
       });
-      toast.success("Réglages enregistrés.");
+      if (orderDirty) {
+        await saveOrder({ data: { albumId, photoIds: order } });
+        setOrderDirty(false);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["photos-export", albumId] });
+      toast.success("Album enregistré.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Enregistrement impossible");
     } finally {
@@ -137,36 +215,25 @@ function BookStudio() {
       const { exportBook, releaseExportCache } = await import("@/lib/print-export");
       release = releaseExportCache;
 
-      const title = coverTitle.trim() || album?.title || "Album";
       const result = await exportBook({
         plan,
         theme,
-        photos: photos.map((photo) => ({ id: photo.id, url: photo.signedUrl })),
+        photos: photos.map((photo) => ({
+          id: photo.id,
+          url: photo.signedUrl,
+          caption: photo.caption,
+        })),
         coverPhoto: coverPhoto ? { id: coverPhoto.id, url: coverPhoto.signedUrl } : undefined,
-        meta: {
-          title,
-          subtitle: coverSubtitle.trim(),
-          dateLabel: new Date(album?.created_at ?? Date.now()).toLocaleDateString("fr-FR", {
-            day: "numeric",
-            month: "long",
-            year: "numeric",
-          }),
-        },
+        meta: { title, subtitle: coverSubtitle.trim(), dateLabel },
         onProgress: (done, total, label) => setProgress({ done, total, label }),
       });
 
-      const base = slugify(title);
-      download(result.interior, base + "-interieur.pdf");
-      download(result.cover, base + "-couverture.pdf");
-      download(
-        new Blob([result.spec], { type: "text/plain;charset=utf-8" }),
-        base + "-fiche-technique.txt",
-      );
+      download(result.archive, slugify(title) + "-impression.zip");
 
       if (result.warnings.length > 0) {
         toast.warning(result.warnings.length + " photo(s) sous 240 dpi — voir la fiche technique.");
       } else {
-        toast.success("Trois fichiers téléchargés.");
+        toast.success("Archive téléchargée.");
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Export impossible");
@@ -200,217 +267,323 @@ function BookStudio() {
           ← Retour à l’album
         </Link>
 
-        <header className="mt-6 mb-10">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-[0.18em] text-terre">
-            Livre imprimable
-          </h2>
-          <h1 className="font-serif text-4xl text-foreground md:text-5xl">
-            {album?.title ?? "Album"}
-          </h1>
-          <p className="mt-3 text-sm text-muted-foreground">
-            {photos.length} photographie{photos.length > 1 ? "s" : ""} · {plan.pages.length} pages ·
-            dos de {spine} mm
-          </p>
+        <header className="mt-6 mb-8 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-[0.18em] text-terre">
+              Mon livre
+            </h2>
+            <h1 className="font-serif text-4xl text-foreground md:text-5xl">{title}</h1>
+            <p className="mt-3 text-sm text-muted-foreground">
+              {photos.length} photographie{photos.length > 1 ? "s" : ""} · {plan.pages.length} pages
+              · {format.label}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="rounded-full bg-terre px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-terre/90 disabled:opacity-60"
+          >
+            {saving ? "Enregistrement…" : orderDirty ? "Enregistrer l’ordre" : "Enregistrer"}
+          </button>
         </header>
 
-        <div className="grid gap-10 lg:grid-cols-[1fr_22rem]">
-          <div className="space-y-10">
-            {/* Thèmes */}
-            <section>
-              <h3 className="mb-1 font-serif text-2xl text-foreground">Thème</h3>
-              <p className="mb-5 text-sm text-muted-foreground">
-                Il décide du papier, de l’encre, de la typographie et du motif de couverture.
+        <div className="mb-8 flex flex-wrap gap-2 border-b border-border">
+          {TABS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setTab(item.id)}
+              className={
+                "-mb-px border-b-2 px-4 py-3 text-sm font-medium transition-colors " +
+                (tab === item.id
+                  ? "border-terre text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground")
+              }
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "apercu" ? (
+          <section>
+            <div className="mb-10 max-w-sm">
+              <CoverPreview
+                theme={theme}
+                format={format}
+                title={title}
+                subtitle={coverSubtitle}
+                photoUrl={coverPhoto?.signedUrl}
+              />
+            </div>
+            {photos.length === 0 ? (
+              <p className="rounded-3xl border border-dashed border-border px-6 py-16 text-center text-sm text-muted-foreground">
+                Ajoutez des photos à l’album pour composer le livre.
               </p>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-                {BOOK_THEMES.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => setThemeId(option.id)}
-                    title={option.description}
-                    className={
-                      "overflow-hidden rounded-2xl border text-left transition-colors " +
-                      (themeId === option.id
-                        ? "border-terre ring-2 ring-terre/40"
-                        : "border-border hover:border-foreground/30")
+            ) : (
+              <BookPages
+                plan={plan}
+                theme={theme}
+                photos={photos.map((photo) => ({
+                  id: photo.id,
+                  signedUrl: photo.signedUrl,
+                  caption: photo.caption,
+                }))}
+                title={title}
+                subtitle={coverSubtitle}
+                dateLabel={dateLabel}
+              />
+            )}
+          </section>
+        ) : null}
+
+        {tab === "mise-en-page" ? (
+          <section>
+            <p className="mb-6 max-w-[70ch] text-sm text-muted-foreground">
+              L’ordre ci-dessous est celui des pages. Déplacez une photo avec les flèches, et
+              écrivez sa légende — elle sera imprimée juste en dessous.
+            </p>
+            <ol className="space-y-3">
+              {photos.map((photo, index) => (
+                <li
+                  key={photo.id}
+                  className="flex flex-wrap items-center gap-4 rounded-2xl border border-border bg-card p-3"
+                >
+                  <span className="w-6 shrink-0 text-center text-sm text-muted-foreground">
+                    {index + 1}
+                  </span>
+                  <img
+                    src={photo.signedUrl}
+                    alt=""
+                    loading="lazy"
+                    className="size-16 shrink-0 rounded-xl object-cover"
+                  />
+                  <input
+                    type="text"
+                    value={captions[photo.id] ?? ""}
+                    maxLength={300}
+                    placeholder="Légende (facultative)"
+                    onChange={(event) =>
+                      setCaptions((current) => ({ ...current, [photo.id]: event.target.value }))
                     }
-                  >
-                    <span
-                      className="flex h-16 items-end gap-1 p-2"
-                      style={{ backgroundColor: option.coverBackground }}
+                    onBlur={() => void commitCaption(photo.id)}
+                    className="min-w-[12rem] flex-1 rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <span className="flex shrink-0 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => move(index, -1)}
+                      disabled={index === 0}
+                      aria-label="Déplacer avant"
+                      className="rounded-full border border-input px-3 py-1.5 text-sm transition-colors hover:bg-muted disabled:opacity-40"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => move(index, 1)}
+                      disabled={index === photos.length - 1}
+                      aria-label="Déplacer après"
+                      className="rounded-full border border-input px-3 py-1.5 text-sm transition-colors hover:bg-muted disabled:opacity-40"
+                    >
+                      ↓
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </section>
+        ) : null}
+
+        {tab === "apparence" ? (
+          <div className="grid gap-10 lg:grid-cols-[1fr_20rem]">
+            <div className="space-y-10">
+              <section>
+                <h3 className="mb-1 font-serif text-2xl text-foreground">Thème</h3>
+                <p className="mb-5 text-sm text-muted-foreground">
+                  Papier, encre, typographie et motif de couverture.
+                </p>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                  {BOOK_THEMES.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setThemeId(option.id)}
+                      title={option.description}
+                      className={
+                        "overflow-hidden rounded-2xl border text-left transition-colors " +
+                        (themeId === option.id
+                          ? "border-terre ring-2 ring-terre/40"
+                          : "border-border hover:border-foreground/30")
+                      }
                     >
                       <span
-                        className="size-4 rounded-full"
-                        style={{ backgroundColor: option.paper }}
-                      />
-                      <span
-                        className="size-4 rounded-full"
-                        style={{ backgroundColor: option.accent }}
-                      />
-                    </span>
-                    <span className="block px-3 py-2 text-sm font-medium text-foreground">
-                      {option.label}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            {/* Format */}
-            <section>
-              <h3 className="mb-1 font-serif text-2xl text-foreground">Format</h3>
-              <p className="mb-5 text-sm text-muted-foreground">
-                Taille finie après coupe. Le fond perdu de 3 mm s’ajoute automatiquement.
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {PRINT_FORMATS.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => setFormatId(option.id)}
-                    className={
-                      "rounded-2xl border p-4 text-left transition-colors " +
-                      (formatId === option.id
-                        ? "border-terre bg-terre/5"
-                        : "border-border hover:bg-muted")
-                    }
-                  >
-                    <span className="flex items-baseline justify-between gap-2">
-                      <span className="text-sm font-medium text-foreground">{option.label}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {option.widthMm} × {option.heightMm} mm
+                        className="flex h-16 items-end gap-1 p-2"
+                        style={{ backgroundColor: option.coverBackground }}
+                      >
+                        <span
+                          className="size-4 rounded-full"
+                          style={{ backgroundColor: option.paper }}
+                        />
+                        <span
+                          className="size-4 rounded-full"
+                          style={{ backgroundColor: option.accent }}
+                        />
                       </span>
-                    </span>
-                    <span className="mt-1 block text-xs leading-snug text-muted-foreground">
-                      {option.description}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
+                      <span className="block px-3 py-2 text-sm font-medium text-foreground">
+                        {option.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
 
-            {/* Couverture */}
-            <section>
-              <h3 className="mb-1 font-serif text-2xl text-foreground">Couverture</h3>
-              <p className="mb-5 text-sm text-muted-foreground">
-                Le titre imprimé peut différer du nom de l’album dans l’application.
-              </p>
+              <section>
+                <h3 className="mb-1 font-serif text-2xl text-foreground">Format</h3>
+                <p className="mb-5 text-sm text-muted-foreground">
+                  Taille finie après coupe ; le fond perdu de 3 mm s’ajoute automatiquement.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {PRINT_FORMATS.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setFormatId(option.id)}
+                      className={
+                        "rounded-2xl border p-4 text-left transition-colors " +
+                        (formatId === option.id
+                          ? "border-terre bg-terre/5"
+                          : "border-border hover:bg-muted")
+                      }
+                    >
+                      <span className="flex items-baseline justify-between gap-2">
+                        <span className="text-sm font-medium text-foreground">{option.label}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {option.widthMm} × {option.heightMm} mm
+                        </span>
+                      </span>
+                      <span className="mt-1 block text-xs leading-snug text-muted-foreground">
+                        {option.description}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
-                  Titre
-                  <input
-                    type="text"
-                    value={coverTitle}
-                    onChange={(event) => setCoverTitle(event.target.value)}
-                    maxLength={120}
-                    className="mt-2 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </label>
-                <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
-                  Sous-titre
-                  <input
-                    type="text"
-                    value={coverSubtitle}
-                    onChange={(event) => setCoverSubtitle(event.target.value)}
-                    maxLength={160}
-                    placeholder="Un lieu, une date, une dédicace…"
-                    className="mt-2 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </label>
-              </div>
-
-              <p className="mt-6 mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
-                Photo de couverture
-              </p>
-              <div className="flex gap-2 overflow-x-auto pb-2">
-                {photos.map((photo) => (
-                  <button
-                    key={photo.id}
-                    type="button"
-                    onClick={() => setCoverPhotoId(photo.id)}
-                    className={
-                      "size-20 shrink-0 overflow-hidden rounded-xl border-2 transition-colors " +
-                      ((coverPhoto?.id ?? null) === photo.id
-                        ? "border-terre"
-                        : "border-transparent hover:border-border")
-                    }
-                  >
-                    <img
-                      src={photo.signedUrl}
-                      alt=""
-                      loading="lazy"
-                      className="size-full object-cover"
+              <section>
+                <h3 className="mb-1 font-serif text-2xl text-foreground">Couverture</h3>
+                <p className="mb-5 text-sm text-muted-foreground">
+                  Le titre imprimé peut différer du nom de l’album dans l’application.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+                    Titre
+                    <input
+                      type="text"
+                      value={coverTitle}
+                      onChange={(event) => setCoverTitle(event.target.value)}
+                      maxLength={120}
+                      className="mt-2 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:ring-2 focus:ring-ring"
                     />
-                  </button>
-                ))}
-              </div>
-            </section>
-          </div>
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+                    Sous-titre
+                    <input
+                      type="text"
+                      value={coverSubtitle}
+                      onChange={(event) => setCoverSubtitle(event.target.value)}
+                      maxLength={160}
+                      placeholder="Un lieu, une date, une dédicace…"
+                      className="mt-2 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </label>
+                </div>
 
-          {/* Colonne latérale : aperçu + export */}
-          <aside className="space-y-6 lg:sticky lg:top-24 lg:self-start">
-            <CoverPreview
-              theme={theme}
-              format={format}
-              title={coverTitle || album?.title || "Album"}
-              subtitle={coverSubtitle}
-              photoUrl={coverPhoto?.signedUrl}
-            />
-
-            <dl className="rounded-2xl border border-border bg-card p-5 text-sm">
-              <div className="flex justify-between py-1">
-                <dt className="text-muted-foreground">Pages</dt>
-                <dd className="text-foreground">{plan.pages.length}</dd>
-              </div>
-              <div className="flex justify-between py-1">
-                <dt className="text-muted-foreground">dont blanches</dt>
-                <dd className="text-foreground">{plan.paddingPages}</dd>
-              </div>
-              <div className="flex justify-between py-1">
-                <dt className="text-muted-foreground">Largeur du dos</dt>
-                <dd className="text-foreground">{spine} mm</dd>
-              </div>
-              <div className="flex justify-between py-1">
-                <dt className="text-muted-foreground">Fond perdu</dt>
-                <dd className="text-foreground">3 mm</dd>
-              </div>
-              <div className="flex justify-between border-t border-border py-1 pt-3">
-                <dt className="text-muted-foreground">Couverture</dt>
-                <dd className={coverDpi < 240 ? "text-destructive" : "text-foreground"}>
-                  ≈ {coverDpi} dpi
-                </dd>
-              </div>
-            </dl>
-
-            {coverDpi < 240 ? (
-              <p className="rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-xs leading-relaxed text-foreground">
-                À ce format, vos photos passent sous 240 dpi : l’import les réduit à 2048 px de
-                large. Le rendu restera correct de loin, mais un format plus petit sera plus net.
-              </p>
-            ) : null}
-
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving || exporting}
-                className="w-full rounded-full border border-input bg-background px-6 py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-60"
-              >
-                {saving ? "Enregistrement…" : "Enregistrer les réglages"}
-              </button>
-              <button
-                type="button"
-                onClick={handleExport}
-                disabled={exporting || photos.length === 0}
-                className="w-full rounded-full bg-terre px-6 py-3.5 text-sm font-medium text-white transition-colors hover:bg-terre/90 disabled:opacity-60"
-              >
-                {exporting ? "Génération…" : "Exporter pour l’imprimeur"}
-              </button>
+                <p className="mt-6 mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+                  Photo de couverture
+                </p>
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {photos.map((photo) => (
+                    <button
+                      key={photo.id}
+                      type="button"
+                      onClick={() => setCoverPhotoId(photo.id)}
+                      className={
+                        "size-20 shrink-0 overflow-hidden rounded-xl border-2 transition-colors " +
+                        ((coverPhoto?.id ?? null) === photo.id
+                          ? "border-terre"
+                          : "border-transparent hover:border-border")
+                      }
+                    >
+                      <img
+                        src={photo.signedUrl}
+                        alt=""
+                        loading="lazy"
+                        className="size-full object-cover"
+                      />
+                    </button>
+                  ))}
+                </div>
+              </section>
             </div>
 
+            <aside className="space-y-6 lg:sticky lg:top-24 lg:self-start">
+              <CoverPreview
+                theme={theme}
+                format={format}
+                title={title}
+                subtitle={coverSubtitle}
+                photoUrl={coverPhoto?.signedUrl}
+              />
+
+              <dl className="rounded-2xl border border-border bg-card p-5 text-sm">
+                <div className="flex justify-between py-1">
+                  <dt className="text-muted-foreground">Pages</dt>
+                  <dd className="text-foreground">{plan.pages.length}</dd>
+                </div>
+                <div className="flex justify-between py-1">
+                  <dt className="text-muted-foreground">Largeur du dos</dt>
+                  <dd className="text-foreground">{spine} mm</dd>
+                </div>
+                <div className="flex justify-between border-t border-border py-1 pt-3">
+                  <dt className="text-muted-foreground">Définition couverture</dt>
+                  <dd className={coverDpi < 240 ? "text-destructive" : "text-foreground"}>
+                    ≈ {coverDpi} dpi
+                  </dd>
+                </div>
+              </dl>
+
+              {coverDpi < 240 ? (
+                <p className="rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-xs leading-relaxed text-foreground">
+                  À ce format, vos photos passent sous 240 dpi : l’import les réduit à 2048 px de
+                  large. Un format plus petit sera plus net.
+                </p>
+              ) : null}
+            </aside>
+          </div>
+        ) : null}
+
+        {/* L'export est réservé à l'administration : c'est elle qui traite avec
+            l'imprimeur, et les fichiers de production n'ont pas à circuler. */}
+        {isAdmin ? (
+          <section className="mt-14 rounded-3xl border border-terre/40 bg-terre/5 p-6">
+            <h3 className="font-serif text-2xl text-foreground">Fichiers d’impression</h3>
+            <p className="mt-2 max-w-[64ch] text-sm text-muted-foreground">
+              Une archive contenant l’intérieur, la couverture (dos de {spine} mm compris) et la
+              fiche technique à joindre au bon de commande.
+            </p>
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={exporting || photos.length === 0}
+              className="mt-5 rounded-full bg-terre px-6 py-3.5 text-sm font-medium text-white transition-colors hover:bg-terre/90 disabled:opacity-60"
+            >
+              {exporting ? "Génération…" : "Exporter pour l’imprimeur"}
+            </button>
+
             {progress ? (
-              <div>
+              <div className="mt-5 max-w-md">
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                   <div
                     className="h-full rounded-full bg-terre transition-[width]"
@@ -419,16 +592,16 @@ function BookStudio() {
                     }}
                   />
                 </div>
-                <p className="mt-2 text-center text-xs text-muted-foreground">{progress.label}</p>
+                <p className="mt-2 text-xs text-muted-foreground">{progress.label}</p>
               </div>
             ) : null}
-
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Trois fichiers : l’intérieur, la couverture (dos compris) et une fiche technique à
-              remettre à l’imprimeur. PDF en RVB — l’imprimeur convertit en CMJN.
-            </p>
-          </aside>
-        </div>
+          </section>
+        ) : (
+          <p className="mt-14 rounded-2xl border border-border bg-muted/40 p-5 text-sm text-muted-foreground">
+            Votre livre est prêt. L’équipe se charge de l’envoi à l’imprimerie : les fichiers de
+            production sont générés depuis l’administration.
+          </p>
+        )}
       </div>
     </div>
   );

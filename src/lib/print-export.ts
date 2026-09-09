@@ -13,6 +13,7 @@
  */
 
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { strToU8, zipSync } from "fflate";
 import { BLEED_MM, effectiveDpi, mmToPt, mmToPx, spineWidthMm } from "./print-formats";
 import { hexToRgb01, type BookTheme } from "./book-themes";
 import type { BookPlan } from "./book-layout";
@@ -25,10 +26,15 @@ const MARK_LENGTH_MM = 5;
 
 const JPEG_QUALITY = 0.92;
 
+/** Hauteur réservée sous une photo légendée. */
+const CAPTION_BAND_MM = 7;
+
 export interface ExportPhoto {
   id: string;
   /** URL signée, lisible par le navigateur. */
   url: string;
+  /** Légende imprimée sous l'image. */
+  caption?: string | null;
 }
 
 export interface ExportMeta {
@@ -39,9 +45,9 @@ export interface ExportMeta {
 }
 
 export interface ExportResult {
-  interior: Blob;
-  cover: Blob;
-  /** Fiche technique à joindre au bon de commande de l'imprimeur. */
+  /** Archive contenant l'intérieur, la couverture et la fiche technique. */
+  archive: Blob;
+  /** Fiche technique, également incluse dans l'archive. */
   spec: string;
   /** Photos trop peu définies pour la surface qu'elles occupent. */
   warnings: string[];
@@ -375,9 +381,28 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
       const photo = photos[slot.photoIndex];
       if (!photo) continue;
 
-      const rendered = await renderSlot(photo.url, slot.widthMm, slot.heightMm);
+      // Une photo légendée cède le bas de son emplacement au texte, plutôt que
+      // de laisser la légende déborder sur la photo voisine.
+      const caption = photo.caption?.trim() ?? "";
+      const imageHeight = caption ? Math.max(10, slot.heightMm - CAPTION_BAND_MM) : slot.heightMm;
+
+      const rendered = await renderSlot(photo.url, slot.widthMm, imageHeight);
       const image = await interior.embedJpg(rendered.bytes);
-      sheet.page.drawImage(image, place(sheet, slot.xMm, slot.yMm, slot.widthMm, slot.heightMm));
+      sheet.page.drawImage(image, place(sheet, slot.xMm, slot.yMm, slot.widthMm, imageHeight));
+
+      if (caption) {
+        const size = 7.5;
+        const text = fitText(caption, italic, size, mmToPt(slot.widthMm));
+        const textWidthMm = (italic.widthOfTextAtSize(text, size) / 72) * 25.4;
+        const p = place(
+          sheet,
+          slot.xMm + (slot.widthMm - textWidthMm) / 2,
+          slot.yMm + imageHeight + CAPTION_BAND_MM - 2.2,
+          0,
+          0,
+        );
+        sheet.page.drawText(text, { x: p.x, y: p.y, size, font: italic, color: color(theme.ink) });
+      }
 
       const dpi = effectiveDpi(rendered.sourceWidth, slot.widthMm);
       if (dpi < 240) {
@@ -523,9 +548,20 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
 
   const spec = buildSpecSheet(plan, theme, spine, meta, warnings);
 
+  // Un seul fichier à télécharger : trois `click()` successifs sur un lien de
+  // téléchargement, les navigateurs n'en honorent que le premier.
+  // Niveau 0 (rangement sans compression) : les PDF le sont déjà.
+  const archive = zipSync(
+    {
+      "interieur.pdf": interiorBytes,
+      "couverture.pdf": coverBytes,
+      "fiche-technique.txt": strToU8(spec),
+    },
+    { level: 0 },
+  );
+
   return {
-    interior: new Blob([interiorBytes as unknown as BlobPart], { type: "application/pdf" }),
-    cover: new Blob([coverBytes as unknown as BlobPart], { type: "application/pdf" }),
+    archive: new Blob([archive as unknown as BlobPart], { type: "application/zip" }),
     spec,
     warnings,
   };
