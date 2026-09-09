@@ -70,8 +70,13 @@ export type Database = {
       photos: {
         Row: {
           album_id: string
+          aspect_ratio: number | null
           caption: string | null
           created_at: string
+          crop_x: number
+          crop_y: number
+          crop_zoom: number
+          fit: string
           id: string
           order_index: number
           storage_path: string
@@ -80,8 +85,13 @@ export type Database = {
         }
         Insert: {
           album_id: string
+          aspect_ratio?: number | null
           caption?: string | null
           created_at?: string
+          crop_x?: number
+          crop_y?: number
+          crop_zoom?: number
+          fit?: string
           id?: string
           order_index?: number
           storage_path: string
@@ -90,8 +100,13 @@ export type Database = {
         }
         Update: {
           album_id?: string
+          aspect_ratio?: number | null
           caption?: string | null
           created_at?: string
+          crop_x?: number
+          crop_y?: number
+          crop_zoom?: number
+          fit?: string
           id?: string
           order_index?: number
           storage_path?: string

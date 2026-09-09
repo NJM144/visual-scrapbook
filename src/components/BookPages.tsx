@@ -1,5 +1,6 @@
 import type { BookPlan } from "@/lib/book-layout";
 import type { BookTheme } from "@/lib/book-themes";
+import type { Framing } from "@/lib/photo-framing";
 
 /**
  * Le livre tel qu'il s'imprimera, page après page.
@@ -14,6 +15,7 @@ export interface ViewerPhoto {
   id: string;
   signedUrl: string;
   caption: string | null;
+  framing: Framing;
 }
 
 /** Doit rester égal à CAPTION_BAND_MM dans print-export.ts. */
@@ -95,13 +97,33 @@ export function BookPages({
                     height: pct(slot.heightMm, format.heightMm),
                   }}
                 >
-                  <img
-                    src={photo.signedUrl}
-                    alt={caption || "Photographie"}
-                    loading="lazy"
-                    className="w-full object-cover"
-                    style={{ height: (imageHeight / slot.heightMm) * 100 + "%" }}
-                  />
+                  <span
+                    className="block overflow-hidden"
+                    style={{
+                      height: (imageHeight / slot.heightMm) * 100 + "%",
+                      backgroundColor: theme.paper,
+                    }}
+                  >
+                    <img
+                      src={photo.signedUrl}
+                      alt={caption || "Photographie"}
+                      loading="lazy"
+                      className="size-full"
+                      style={{
+                        objectFit: photo.framing.fit,
+                        objectPosition:
+                          photo.framing.cropX * 100 + "% " + photo.framing.cropY * 100 + "%",
+                        // Même origine que le point focal : zoomer ne déplace
+                        // pas le sujet que l'auteur a choisi de garder.
+                        transformOrigin:
+                          photo.framing.cropX * 100 + "% " + photo.framing.cropY * 100 + "%",
+                        transform:
+                          photo.framing.fit === "cover" && photo.framing.cropZoom > 1
+                            ? "scale(" + photo.framing.cropZoom + ")"
+                            : undefined,
+                      }}
+                    />
+                  </span>
                   {caption ? (
                     <span
                       className="block truncate pt-[2%] text-center text-[clamp(0.4rem,1.5cqw,0.6rem)] italic"

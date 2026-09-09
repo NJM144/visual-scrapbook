@@ -440,3 +440,67 @@ export const reorderPhotos = createServerFn({ method: "POST" })
     }
     return { success: true };
   });
+
+/** Cadrage d'une photo : point focal, zoom, mode de remplissage. */
+export const updatePhotoFraming = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data) =>
+    z
+      .object({
+        photoId: z.string().uuid(),
+        cropX: z.number().min(0).max(1),
+        cropY: z.number().min(0).max(1),
+        cropZoom: z.number().min(1).max(4),
+        fit: z.enum(["cover", "contain"]),
+        aspectRatio: z.number().positive().max(100).optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ context, data }) => {
+    const base = {
+      crop_x: data.cropX,
+      crop_y: data.cropY,
+      crop_zoom: data.cropZoom,
+      fit: data.fit,
+    };
+    // Mesuré à l'analyse : on ne l'écrase pas quand il n'est pas fourni.
+    const patch =
+      data.aspectRatio === undefined ? base : { ...base, aspect_ratio: data.aspectRatio };
+
+    const { error } = await context.supabase
+      .from("photos")
+      .update(patch)
+      .eq("id", data.photoId)
+      .eq("user_id", context.userId);
+
+    if (error) throw error;
+    return { success: true };
+  });
+
+/** Enregistre les rapports d'aspect mesurés, pour composer les pages. */
+export const saveAspectRatios = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data) =>
+    z
+      .object({
+        entries: z
+          .array(
+            z.object({ photoId: z.string().uuid(), aspectRatio: z.number().positive().max(100) }),
+          )
+          .min(1)
+          .max(500),
+      })
+      .parse(data),
+  )
+  .handler(async ({ context, data }) => {
+    for (const entry of data.entries) {
+      const { error } = await context.supabase
+        .from("photos")
+        .update({ aspect_ratio: entry.aspectRatio })
+        .eq("id", entry.photoId)
+        .eq("user_id", context.userId);
+
+      if (error) throw error;
+    }
+    return { success: true };
+  });

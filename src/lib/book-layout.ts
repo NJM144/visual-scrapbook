@@ -47,14 +47,24 @@ export interface BookPlan {
  */
 const RHYTHM: number[] = [1, 2, 1, 3, 2, 4, 1, 2];
 
-function splitAlongLongestAxis(
+/**
+ * Découpe en `parts` bandes.
+ *
+ * L'axe de coupe suit l'orientation des photos, pas celle de la boîte : deux
+ * photos verticales côte à côte gardent presque tout leur cadre, empilées elles
+ * perdent la moitié de leur hauteur.
+ */
+function splitForOrientation(
   x: number,
   y: number,
   width: number,
   height: number,
   parts: number,
+  portraitBias: boolean | null,
 ): PhotoSlot[] {
-  const horizontal = width >= height;
+  // Des photos verticales veulent des bandes verticales, donc une coupe
+  // horizontale. À défaut d'information, on coupe le plus grand côté.
+  const horizontal = portraitBias === null ? width >= height : portraitBias;
   const total = horizontal ? width : height;
   const each = (total - GUTTER_MM * (parts - 1)) / parts;
 
@@ -77,13 +87,14 @@ function buildSlots(
   width: number,
   height: number,
   count: number,
+  portraitBias: boolean | null,
 ): PhotoSlot[] {
   if (count <= 1) return [{ photoIndex: -1, xMm: x, yMm: y, widthMm: width, heightMm: height }];
-  if (count === 2) return splitAlongLongestAxis(x, y, width, height, 2);
+  if (count === 2) return splitForOrientation(x, y, width, height, 2, portraitBias);
 
   if (count === 3) {
     // Une grande photo sur deux tiers, deux petites sur le tiers restant.
-    const horizontal = width >= height;
+    const horizontal = portraitBias === null ? width >= height : portraitBias;
     const major = ((horizontal ? width : height) - GUTTER_MM) * (2 / 3);
     const minor = (horizontal ? width : height) - GUTTER_MM - major;
 
@@ -99,7 +110,7 @@ function buildSlots(
     const restW = horizontal ? minor : width;
     const restH = horizontal ? height : minor;
 
-    return [large, ...splitAlongLongestAxis(restX, restY, restW, restH, 2)];
+    return [large, ...splitForOrientation(restX, restY, restW, restH, 2, !horizontal)];
   }
 
   // Quatre photos : grille 2 × 2.
@@ -119,11 +130,26 @@ function buildSlots(
   ];
 }
 
+/** Majorité de photos verticales ? `null` si l'information manque. */
+function portraitMajority(aspects: number[]): boolean | null {
+  const known = aspects.filter((value) => Number.isFinite(value) && value > 0);
+  if (known.length === 0) return null;
+
+  const portraits = known.filter((value) => value < 1).length;
+  return portraits * 2 >= known.length;
+}
+
+/**
+ * @param aspects Rapport largeur/hauteur de chaque photo, dans l'ordre du
+ * livre. Une valeur absente ou nulle fait retomber la page sur un découpage
+ * neutre plutôt que de fausser l'orientation.
+ */
 export function planBook(
-  photoCount: number,
+  aspects: number[],
   formatId: string | null | undefined,
   theme: BookTheme,
 ): BookPlan {
+  const photoCount = aspects.length;
   const format = findFormat(formatId);
   const margin = theme.photoMarginMm;
   const boxX = margin;
@@ -138,8 +164,9 @@ export function planBook(
   while (placed < photoCount) {
     const wanted = RHYTHM[rhythmStep % RHYTHM.length] ?? 1;
     const count = Math.min(wanted, photoCount - placed);
+    const bias = portraitMajority(aspects.slice(placed, placed + count));
 
-    const slots = buildSlots(boxX, boxY, boxW, boxH, count).map((slot, index) => ({
+    const slots = buildSlots(boxX, boxY, boxW, boxH, count, bias).map((slot, index) => ({
       ...slot,
       photoIndex: placed + index,
     }));

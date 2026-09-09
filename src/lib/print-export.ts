@@ -17,6 +17,7 @@ import { strToU8, zipSync } from "fflate";
 import { BLEED_MM, effectiveDpi, mmToPt, mmToPx, spineWidthMm } from "./print-formats";
 import { hexToRgb01, type BookTheme } from "./book-themes";
 import type { BookPlan } from "./book-layout";
+import { computePlacement, normalizeFraming, type Framing } from "./photo-framing";
 
 /** Marge extérieure portant les traits de coupe, au-delà du fond perdu. */
 const MARKS_MM = 8;
@@ -35,6 +36,8 @@ export interface ExportPhoto {
   url: string;
   /** Légende imprimée sous l'image. */
   caption?: string | null;
+  /** Cadrage choisi par l'auteur ; centré et couvrant par défaut. */
+  framing?: Partial<Framing> | null;
 }
 
 export interface ExportMeta {
@@ -85,7 +88,13 @@ async function loadBitmap(url: string): Promise<ImageBitmap> {
  * moyen de garantir la résolution du fichier final, et ça évite de transporter
  * des pixels qui seront de toute façon coupés.
  */
-async function renderSlot(url: string, widthMm: number, heightMm: number): Promise<Rendered> {
+async function renderSlot(
+  url: string,
+  widthMm: number,
+  heightMm: number,
+  framing: Framing,
+  paperHex: string,
+): Promise<Rendered> {
   const bitmap = await loadBitmap(url);
   const targetW = Math.max(1, mmToPx(widthMm));
   const targetH = Math.max(1, mmToPx(heightMm));
@@ -98,11 +107,14 @@ async function renderSlot(url: string, widthMm: number, heightMm: number): Promi
 
   context.imageSmoothingQuality = "high";
 
-  // Cadrage « couvrant » : on remplit sans déformer, quitte à rogner.
-  const scale = Math.max(targetW / bitmap.width, targetH / bitmap.height);
-  const drawW = bitmap.width * scale;
-  const drawH = bitmap.height * scale;
-  context.drawImage(bitmap, (targetW - drawW) / 2, (targetH - drawH) / 2, drawW, drawH);
+  // Le JPEG n'a pas de transparence : en mode « photo entière », les marges
+  // doivent être peintes de la couleur du papier, sinon elles sortent noires.
+  context.fillStyle = paperHex;
+  context.fillRect(0, 0, targetW, targetH);
+
+  const placement = computePlacement(bitmap.width, bitmap.height, targetW, targetH, framing);
+  const { sx, sy, sw, sh } = placement.source;
+  context.drawImage(bitmap, sx, sy, sw, sh, placement.dx, placement.dy, placement.dw, placement.dh);
 
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY),
@@ -386,7 +398,13 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
       const caption = photo.caption?.trim() ?? "";
       const imageHeight = caption ? Math.max(10, slot.heightMm - CAPTION_BAND_MM) : slot.heightMm;
 
-      const rendered = await renderSlot(photo.url, slot.widthMm, imageHeight);
+      const rendered = await renderSlot(
+        photo.url,
+        slot.widthMm,
+        imageHeight,
+        normalizeFraming(photo.framing),
+        theme.paper,
+      );
       const image = await interior.embedJpg(rendered.bytes);
       sheet.page.drawImage(image, place(sheet, slot.xMm, slot.yMm, slot.widthMm, imageHeight));
 
@@ -467,6 +485,8 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
         photo.url,
         format.widthMm + BLEED_MM,
         format.heightMm + BLEED_MM * 2,
+        normalizeFraming(photo.framing),
+        theme.coverBackground,
       );
       const image = await cover.embedJpg(rendered.bytes);
       sheet.page.drawImage(
@@ -485,6 +505,8 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
         photo.url,
         format.widthMm - inset * 2,
         format.heightMm * 0.52,
+        normalizeFraming(photo.framing),
+        theme.coverBackground,
       );
       const image = await cover.embedJpg(rendered.bytes);
       sheet.page.drawImage(

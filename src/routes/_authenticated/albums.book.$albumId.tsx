@@ -8,14 +8,25 @@ import {
   getIsAdmin,
   getPhotosForExport,
   reorderPhotos,
+  saveAspectRatios,
   updateAlbumBook,
   updatePhotoCaption,
+  updatePhotoFraming,
 } from "@/lib/albums.functions";
 import { BOOK_THEMES, findTheme } from "@/lib/book-themes";
 import { PRINT_FORMATS, findFormat, spineWidthMm, effectiveDpi } from "@/lib/print-formats";
 import { planBook } from "@/lib/book-layout";
 import { CoverPreview } from "@/components/CoverPreview";
 import { BookPages } from "@/components/BookPages";
+import { PhotoFramer } from "@/components/PhotoFramer";
+import { normalizeFraming, type Framing } from "@/lib/photo-framing";
+import {
+  analyzePhoto,
+  photosNeedingAttention,
+  recommendFormat,
+  recommendTheme,
+  type PhotoStats,
+} from "@/lib/photo-analysis";
 
 export const Route = createFileRoute("/_authenticated/albums/book/$albumId")({
   head: () => ({
@@ -69,6 +80,8 @@ function BookStudio() {
   const saveBook = useServerFn(updateAlbumBook);
   const saveCaption = useServerFn(updatePhotoCaption);
   const saveOrder = useServerFn(reorderPhotos);
+  const saveFraming = useServerFn(updatePhotoFraming);
+  const saveAspects = useServerFn(saveAspectRatios);
 
   const albumQuery = useQuery({
     queryKey: ["album-export", albumId],
@@ -95,7 +108,12 @@ function BookStudio() {
   /** Ordre en cours d'édition, pas encore enregistré. */
   const [order, setOrder] = useState<string[]>([]);
   const [captions, setCaptions] = useState<Record<string, string>>({});
+  const [framings, setFramings] = useState<Record<string, Framing>>({});
+  const [openFramer, setOpenFramer] = useState<string | null>(null);
   const [orderDirty, setOrderDirty] = useState(false);
+
+  const [analysis, setAnalysis] = useState<PhotoStats[] | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -117,6 +135,19 @@ function BookStudio() {
   useEffect(() => {
     setOrder(rawPhotos.map((photo) => photo.id));
     setCaptions(Object.fromEntries(rawPhotos.map((photo) => [photo.id, photo.caption ?? ""])));
+    setFramings(
+      Object.fromEntries(
+        rawPhotos.map((photo) => [
+          photo.id,
+          normalizeFraming({
+            cropX: photo.crop_x,
+            cropY: photo.crop_y,
+            cropZoom: photo.crop_zoom,
+            fit: photo.fit === "contain" ? "contain" : "cover",
+          }),
+        ]),
+      ),
+    );
     setOrderDirty(false);
   }, [rawPhotos]);
 
@@ -127,15 +158,28 @@ function BookStudio() {
     return order
       .map((id) => byId.get(id))
       .filter((photo): photo is (typeof rawPhotos)[number] => Boolean(photo))
-      .map((photo) => ({ ...photo, caption: captions[photo.id] ?? photo.caption }));
-  }, [order, rawPhotos, captions]);
+      .map((photo) => ({
+        ...photo,
+        caption: captions[photo.id] ?? photo.caption,
+        framing: framings[photo.id] ?? normalizeFraming(null),
+      }));
+  }, [order, rawPhotos, captions, framings]);
 
   const theme = findTheme(themeId);
   const format = findFormat(formatId);
-  const plan = useMemo(
-    () => planBook(photos.length, formatId, theme),
-    [photos.length, formatId, theme],
-  );
+  // Les rapports d'aspect guident le découpage des pages : deux photos
+  // verticales côte à côte plutôt qu'empilées, c'est autant de rognage évité.
+  const aspects = useMemo(() => photos.map((photo) => photo.aspect_ratio ?? 0), [photos]);
+  const plan = useMemo(() => planBook(aspects, formatId, theme), [aspects, formatId, theme]);
+
+  /** Rapport largeur/hauteur de l'emplacement occupé par chaque photo. */
+  const slotAspects = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const page of plan.pages) {
+      for (const slot of page.slots) map.set(slot.photoIndex, slot.widthMm / slot.heightMm);
+    }
+    return map;
+  }, [plan]);
   const spine = spineWidthMm(plan.pages.length, true);
   const coverPhoto = photos.find((photo) => photo.id === coverPhotoId) ?? photos[0];
   const coverDpi = effectiveDpi(2048, format.widthMm);
@@ -172,6 +216,63 @@ function BookStudio() {
       toast.error(error instanceof Error ? error.message : "Légende non enregistrée");
     }
   };
+
+  const commitFraming = async (photoId: string, next: Framing) => {
+    setFramings((current) => ({ ...current, [photoId]: next }));
+    try {
+      await saveFraming({
+        data: {
+          photoId,
+          cropX: next.cropX,
+          cropY: next.cropY,
+          cropZoom: next.cropZoom,
+          fit: next.fit,
+        },
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Cadrage non enregistré");
+    }
+  };
+
+  /**
+   * Analyse les photos : orientations, couleurs dominantes, perte au rognage.
+   * Les rapports d'aspect mesurés sont enregistrés au passage — ce sont eux qui
+   * permettent de composer les pages selon l'orientation réelle.
+   */
+  const runAnalysis = async () => {
+    if (photos.length === 0) return;
+
+    setAnalyzing(true);
+    try {
+      const results: PhotoStats[] = [];
+      for (const photo of photos) {
+        const stats = await analyzePhoto(photo.id, photo.signedUrl);
+        if (stats) results.push(stats);
+      }
+      setAnalysis(results);
+
+      const entries = results
+        .filter((stats) => Number.isFinite(stats.aspect) && stats.aspect > 0)
+        .map((stats) => ({ photoId: stats.id, aspectRatio: Number(stats.aspect.toFixed(4)) }));
+      if (entries.length > 0) {
+        await saveAspects({ data: { entries } });
+        await queryClient.invalidateQueries({ queryKey: ["photos-export", albumId] });
+      }
+
+      toast.success(results.length + " photo(s) analysée(s).");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Analyse impossible");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const formatAdvice = useMemo(() => (analysis ? recommendFormat(analysis) : []), [analysis]);
+  const themeAdvice = useMemo(() => (analysis ? recommendTheme(analysis) : []), [analysis]);
+  const attention = useMemo(
+    () => (analysis ? photosNeedingAttention(analysis, format) : []),
+    [analysis, format],
+  );
 
   const handleSave = async () => {
     setSaving(true);
@@ -222,6 +323,7 @@ function BookStudio() {
           id: photo.id,
           url: photo.signedUrl,
           caption: photo.caption,
+          framing: photo.framing,
         })),
         coverPhoto: coverPhoto ? { id: coverPhoto.id, url: coverPhoto.signedUrl } : undefined,
         meta: { title, subtitle: coverSubtitle.trim(), dateLabel },
@@ -329,6 +431,7 @@ function BookStudio() {
                   id: photo.id,
                   signedUrl: photo.signedUrl,
                   caption: photo.caption,
+                  framing: photo.framing,
                 }))}
                 title={title}
                 subtitle={coverSubtitle}
@@ -340,56 +443,88 @@ function BookStudio() {
 
         {tab === "mise-en-page" ? (
           <section>
-            <p className="mb-6 max-w-[70ch] text-sm text-muted-foreground">
-              L’ordre ci-dessous est celui des pages. Déplacez une photo avec les flèches, et
-              écrivez sa légende — elle sera imprimée juste en dessous.
+            <p className="mb-4 max-w-[70ch] text-sm text-muted-foreground">
+              L’ordre ci-dessous est celui des pages. Déplacez une photo avec les flèches, écrivez
+              sa légende, et cliquez sur <strong className="font-medium">Cadrer</strong> pour
+              choisir ce qui reste visible dans le cadre.
             </p>
+
+            {attention.length > 0 ? (
+              <p className="mb-6 rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-foreground">
+                {attention.length} photo(s) perdent plus de 30 % de leur surface au cadrage
+                automatique dans ce format. Ouvrez leur cadrage, ou passez-les en «&nbsp;photo
+                entière&nbsp;».
+              </p>
+            ) : null}
             <ol className="space-y-3">
               {photos.map((photo, index) => (
-                <li
-                  key={photo.id}
-                  className="flex flex-wrap items-center gap-4 rounded-2xl border border-border bg-card p-3"
-                >
-                  <span className="w-6 shrink-0 text-center text-sm text-muted-foreground">
-                    {index + 1}
-                  </span>
-                  <img
-                    src={photo.signedUrl}
-                    alt=""
-                    loading="lazy"
-                    className="size-16 shrink-0 rounded-xl object-cover"
-                  />
-                  <input
-                    type="text"
-                    value={captions[photo.id] ?? ""}
-                    maxLength={300}
-                    placeholder="Légende (facultative)"
-                    onChange={(event) =>
-                      setCaptions((current) => ({ ...current, [photo.id]: event.target.value }))
-                    }
-                    onBlur={() => void commitCaption(photo.id)}
-                    className="min-w-[12rem] flex-1 rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  />
-                  <span className="flex shrink-0 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => move(index, -1)}
-                      disabled={index === 0}
-                      aria-label="Déplacer avant"
-                      className="rounded-full border border-input px-3 py-1.5 text-sm transition-colors hover:bg-muted disabled:opacity-40"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => move(index, 1)}
-                      disabled={index === photos.length - 1}
-                      aria-label="Déplacer après"
-                      className="rounded-full border border-input px-3 py-1.5 text-sm transition-colors hover:bg-muted disabled:opacity-40"
-                    >
-                      ↓
-                    </button>
-                  </span>
+                <li key={photo.id} className="rounded-2xl border border-border bg-card p-3">
+                  <div className="flex flex-wrap items-center gap-4">
+                    <span className="w-6 shrink-0 text-center text-sm text-muted-foreground">
+                      {index + 1}
+                    </span>
+                    <img
+                      src={photo.signedUrl}
+                      alt=""
+                      loading="lazy"
+                      className="size-16 shrink-0 rounded-xl object-cover"
+                    />
+                    <input
+                      type="text"
+                      value={captions[photo.id] ?? ""}
+                      maxLength={300}
+                      placeholder="Légende (facultative)"
+                      onChange={(event) =>
+                        setCaptions((current) => ({ ...current, [photo.id]: event.target.value }))
+                      }
+                      onBlur={() => void commitCaption(photo.id)}
+                      className="min-w-[12rem] flex-1 rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <span className="flex shrink-0 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setOpenFramer(openFramer === photo.id ? null : photo.id)}
+                        className={
+                          "rounded-full border px-4 py-1.5 text-sm transition-colors " +
+                          (openFramer === photo.id
+                            ? "border-terre bg-terre/10"
+                            : "border-input hover:bg-muted")
+                        }
+                      >
+                        Cadrer
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => move(index, -1)}
+                        disabled={index === 0}
+                        aria-label="Déplacer avant"
+                        className="rounded-full border border-input px-3 py-1.5 text-sm transition-colors hover:bg-muted disabled:opacity-40"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => move(index, 1)}
+                        disabled={index === photos.length - 1}
+                        aria-label="Déplacer après"
+                        className="rounded-full border border-input px-3 py-1.5 text-sm transition-colors hover:bg-muted disabled:opacity-40"
+                      >
+                        ↓
+                      </button>
+                    </span>
+                  </div>
+
+                  {openFramer === photo.id ? (
+                    <div className="mt-4 max-w-md border-t border-border pt-4">
+                      <PhotoFramer
+                        url={photo.signedUrl}
+                        slotAspect={slotAspects.get(index) ?? 1}
+                        framing={photo.framing}
+                        paperColor={theme.paper}
+                        onChange={(next) => void commitFraming(photo.id, next)}
+                      />
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ol>
@@ -399,6 +534,92 @@ function BookStudio() {
         {tab === "apparence" ? (
           <div className="grid gap-10 lg:grid-cols-[1fr_20rem]">
             <div className="space-y-10">
+              <section className="rounded-3xl border border-terre/40 bg-terre/5 p-6">
+                <h3 className="font-serif text-2xl text-foreground">Analyse automatique</h3>
+                <p className="mt-2 max-w-[64ch] text-sm text-muted-foreground">
+                  Vos photos sont mesurées dans le navigateur — orientations, couleurs dominantes,
+                  perte au rognage — pour proposer le format qui coupe le moins et la palette qui
+                  s’accorde le mieux. Aucune image n’est envoyée ailleurs.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={runAnalysis}
+                  disabled={analyzing || photos.length === 0}
+                  className="mt-5 rounded-full bg-terre px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-terre/90 disabled:opacity-60"
+                >
+                  {analyzing
+                    ? "Analyse en cours…"
+                    : analysis
+                      ? "Relancer l’analyse"
+                      : "Analyser mes photos"}
+                </button>
+
+                {analysis && formatAdvice[0] && themeAdvice[0] ? (
+                  <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-border bg-background p-4">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+                        Format conseillé
+                      </p>
+                      <p className="mt-2 text-base font-medium text-foreground">
+                        {formatAdvice[0].format.label}
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {formatAdvice[0].reason}
+                      </p>
+                      {formatId === formatAdvice[0].format.id ? (
+                        <p className="mt-3 text-xs text-terre">Déjà sélectionné.</p>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setFormatId(formatAdvice[0]!.format.id)}
+                          className="mt-3 rounded-full border border-input px-4 py-1.5 text-xs transition-colors hover:bg-muted"
+                        >
+                          Appliquer
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="rounded-2xl border border-border bg-background p-4">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+                        Thème conseillé
+                      </p>
+                      <p className="mt-2 text-base font-medium text-foreground">
+                        {themeAdvice[0].theme.label}
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {themeAdvice[0].reason}
+                      </p>
+                      <span className="mt-3 flex gap-1">
+                        {analysis
+                          .flatMap((stats) => stats.colors.slice(0, 2))
+                          .slice(0, 8)
+                          .map((rgb, index) => (
+                            <span
+                              key={index}
+                              className="size-4 rounded-full ring-1 ring-black/10"
+                              style={{
+                                backgroundColor: "rgb(" + rgb.r + "," + rgb.g + "," + rgb.b + ")",
+                              }}
+                            />
+                          ))}
+                      </span>
+                      {themeId === themeAdvice[0].theme.id ? (
+                        <p className="mt-3 text-xs text-terre">Déjà sélectionné.</p>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setThemeId(themeAdvice[0]!.theme.id)}
+                          className="mt-3 rounded-full border border-input px-4 py-1.5 text-xs transition-colors hover:bg-muted"
+                        >
+                          Appliquer
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+
               <section>
                 <h3 className="mb-1 font-serif text-2xl text-foreground">Thème</h3>
                 <p className="mb-5 text-sm text-muted-foreground">

@@ -25,6 +25,15 @@ export interface Photo {
   caption: string | null;
   order_index: number;
   created_at: string;
+  /** Point focal horizontal du cadrage, 0 à 1. */
+  crop_x: number;
+  crop_y: number;
+  /** Zoom au-delà du cadrage couvrant. 1 = aucun. */
+  crop_zoom: number;
+  /** 'cover' rogne pour remplir, 'contain' montre la photo entière. */
+  fit: string;
+  /** Largeur / hauteur de l'image, mesurée à l'analyse. */
+  aspect_ratio: number | null;
 }
 
 export interface PhotoWithSignedUrl extends Photo {
