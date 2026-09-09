@@ -19,6 +19,8 @@ import { planBook } from "@/lib/book-layout";
 import { CoverPreview } from "@/components/CoverPreview";
 import { BookPages } from "@/components/BookPages";
 import { PhotoFramer } from "@/components/PhotoFramer";
+import { describePhotoAI, suggestAlbumTextsAI } from "@/lib/ai.functions";
+import { createAiThumbnail } from "@/lib/image-processing";
 import { normalizeFraming, type Framing } from "@/lib/photo-framing";
 import {
   analyzePhoto,
@@ -82,6 +84,8 @@ function BookStudio() {
   const saveOrder = useServerFn(reorderPhotos);
   const saveFraming = useServerFn(updatePhotoFraming);
   const saveAspects = useServerFn(saveAspectRatios);
+  const describeAI = useServerFn(describePhotoAI);
+  const suggestTexts = useServerFn(suggestAlbumTextsAI);
 
   const albumQuery = useQuery({
     queryKey: ["album-export", albumId],
@@ -114,6 +118,8 @@ function BookStudio() {
 
   const [analysis, setAnalysis] = useState<PhotoStats[] | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [aiRunning, setAiRunning] = useState(false);
+  const [aiStep, setAiStep] = useState<{ done: number; total: number; label: string } | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -264,6 +270,104 @@ function BookStudio() {
       toast.error(error instanceof Error ? error.message : "Analyse impossible");
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  /**
+   * Réajustement complet d'un album, y compris déjà composé.
+   *
+   * Le modèle de vision voit chaque photo et rend trois choses : une légende, la
+   * position du sujet principal — qui devient le point focal du cadrage, donc
+   * une réponse directe au rognage —, et s'il faut la montrer entière. Les
+   * réglages sont enregistrés photo par photo : une coupure réseau à la
+   * quinzième image laisse les quatorze premières acquises.
+   */
+  const runAiAdjust = async () => {
+    if (photos.length === 0) return;
+
+    setAiRunning(true);
+    setAiStep({ done: 0, total: photos.length + 1, label: "Lecture des photos…" });
+
+    const nextCaptions: Record<string, string> = { ...captions };
+    const nextFramings: Record<string, Framing> = { ...framings };
+    let described = 0;
+    let failed = 0;
+
+    try {
+      for (const [index, photo] of photos.entries()) {
+        setAiStep({
+          done: index,
+          total: photos.length + 1,
+          label: "Photo " + (index + 1) + " / " + photos.length,
+        });
+
+        try {
+          const thumbnail = await createAiThumbnail(photo.signedUrl);
+          if (!thumbnail) {
+            failed += 1;
+            continue;
+          }
+
+          const result = await describeAI({
+            data: { imageBase64: thumbnail.base64, mimeType: thumbnail.mimeType },
+          });
+
+          const framing: Framing = normalizeFraming({
+            cropX: result.focusX,
+            cropY: result.focusY,
+            cropZoom: 1,
+            fit: result.wholeImage ? "contain" : "cover",
+          });
+          nextFramings[photo.id] = framing;
+          await saveFraming({
+            data: {
+              photoId: photo.id,
+              cropX: framing.cropX,
+              cropY: framing.cropY,
+              cropZoom: framing.cropZoom,
+              fit: framing.fit,
+            },
+          });
+
+          if (result.caption) {
+            nextCaptions[photo.id] = result.caption;
+            await saveCaption({ data: { photoId: photo.id, caption: result.caption } });
+          }
+          described += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+
+      setCaptions(nextCaptions);
+      setFramings(nextFramings);
+
+      // Titre et sous-titre, déduits des légendes obtenues.
+      setAiStep({ done: photos.length, total: photos.length + 1, label: "Titre de couverture…" });
+      const list = photos.map((photo) => nextCaptions[photo.id] ?? "").filter(Boolean);
+      if (list.length > 0) {
+        try {
+          const texts = await suggestTexts({ data: { captions: list, dateLabel } });
+          if (texts.title) setCoverTitle(texts.title);
+          if (texts.subtitle) setCoverSubtitle(texts.subtitle);
+        } catch {
+          // Le titre est un bonus : son échec ne doit pas perdre les légendes.
+        }
+      }
+
+      // Mesure locale ensuite : elle rafraîchit les photos depuis la base, donc
+      // avec les valeurs que l'on vient d'y écrire.
+      await runAnalysis();
+
+      if (described === 0) toast.error("Aucune photo n'a pu être analysée.");
+      else if (failed > 0)
+        toast.warning(described + " photo(s) ajustée(s), " + failed + " échec(s).");
+      else toast.success(described + " photo(s) ajustée(s). Vérifiez, puis enregistrez.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Réajustement impossible");
+    } finally {
+      setAiRunning(false);
+      setAiStep(null);
     }
   };
 
@@ -448,6 +552,43 @@ function BookStudio() {
               sa légende, et cliquez sur <strong className="font-medium">Cadrer</strong> pour
               choisir ce qui reste visible dans le cadre.
             </p>
+
+            <section className="mb-6 rounded-3xl border border-terre/40 bg-terre/5 p-6">
+              <h3 className="font-serif text-2xl text-foreground">Réajuster avec l’IA</h3>
+              <p className="mt-2 max-w-[68ch] text-sm text-muted-foreground">
+                Un modèle de vision regarde chaque photo et en déduit une légende, la position du
+                sujet — qui devient le point de cadrage, donc plus de visage coupé — et s’il faut la
+                montrer entière. Il propose ensuite un titre de couverture. Fonctionne aussi sur un
+                album déjà composé : les réglages existants sont remplacés.
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Vos photos sont envoyées au service d’analyse pour cette opération, en version
+                réduite.
+              </p>
+
+              <button
+                type="button"
+                onClick={runAiAdjust}
+                disabled={aiRunning || photos.length === 0}
+                className="mt-5 rounded-full bg-terre px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-terre/90 disabled:opacity-60"
+              >
+                {aiRunning ? "Analyse en cours…" : "Réajuster tout l’album"}
+              </button>
+
+              {aiStep ? (
+                <div className="mt-5 max-w-md">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-terre transition-[width]"
+                      style={{
+                        width: Math.round((aiStep.done / Math.max(1, aiStep.total)) * 100) + "%",
+                      }}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">{aiStep.label}</p>
+                </div>
+              ) : null}
+            </section>
 
             {attention.length > 0 ? (
               <p className="mb-6 rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-foreground">

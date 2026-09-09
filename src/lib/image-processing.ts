@@ -125,3 +125,48 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
 }
+
+/** Côté maximal de la vignette envoyée au modèle de vision. */
+const AI_THUMBNAIL_DIMENSION = 512;
+const AI_THUMBNAIL_QUALITY = 0.72;
+
+/**
+ * Vignette encodée en base64 pour l'analyse par le modèle de vision.
+ *
+ * 512 px suffisent à décrire une scène et à y situer un sujet. Envoyer
+ * l'originale multiplierait par vingt le poids des requêtes sans rien apporter
+ * au modèle.
+ */
+export async function createAiThumbnail(
+  url: string,
+): Promise<{ base64: string; mimeType: string } | null> {
+  let bitmap: ImageBitmap;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    bitmap = await decode(new File([await response.blob()], "photo"));
+  } catch {
+    return null;
+  }
+
+  try {
+    const { width, height } = scaledSize(bitmap.width, bitmap.height, AI_THUMBNAIL_DIMENSION);
+    const blob = await toBlob(draw(bitmap, width, height), AI_THUMBNAIL_QUALITY);
+    if (!blob) return null;
+
+    const buffer = new Uint8Array(await blob.arrayBuffer());
+    let binary = "";
+    // Par tranches : passer un tableau de 500 000 octets à String.fromCharCode
+    // dépasse la limite d'arguments de la pile.
+    const chunk = 0x8000;
+    for (let i = 0; i < buffer.length; i += chunk) {
+      binary += String.fromCharCode(...buffer.subarray(i, i + chunk));
+    }
+
+    return { base64: btoa(binary), mimeType: "image/jpeg" };
+  } catch {
+    return null;
+  } finally {
+    bitmap.close();
+  }
+}
