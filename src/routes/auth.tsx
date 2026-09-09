@@ -4,14 +4,21 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
 import { useAuth } from "@/hooks/use-auth";
+import { supportsLovableOAuth } from "@/lib/hosting";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
     meta: [
       { title: "Connexion — Anthologie" },
-      { name: "description", content: "Connectez-vous à Anthologie pour créer et retrouver vos albums photos." },
+      {
+        name: "description",
+        content: "Connectez-vous à Anthologie pour créer et retrouver vos albums photos.",
+      },
       { property: "og:title", content: "Connexion — Anthologie" },
-      { property: "og:description", content: "Connectez-vous à Anthologie pour créer et retrouver vos albums photos." },
+      {
+        property: "og:description",
+        content: "Connectez-vous à Anthologie pour créer et retrouver vos albums photos.",
+      },
     ],
   }),
   component: AuthPage,
@@ -24,6 +31,12 @@ function AuthPage() {
   const [busy, setBusy] = useState(false);
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+
+  // Renseigné après montage : window n'existe pas pendant le rendu serveur.
+  const [googleAvailable, setGoogleAvailable] = useState(false);
+  useEffect(() => {
+    setGoogleAvailable(supportsLovableOAuth(window.location.hostname));
+  }, []);
 
   useEffect(() => {
     if (!loading && user) {
@@ -130,19 +143,23 @@ function AuthPage() {
           </button>
         </form>
 
-        <div className="my-8 flex items-center gap-4">
-          <span className="h-px flex-1 bg-border" />
-          <span className="text-xs uppercase tracking-widest text-muted-foreground/60">ou</span>
-          <span className="h-px flex-1 bg-border" />
-        </div>
+        {googleAvailable ? (
+          <>
+            <div className="my-8 flex items-center gap-4">
+              <span className="h-px flex-1 bg-border" />
+              <span className="text-xs uppercase tracking-widest text-muted-foreground/60">ou</span>
+              <span className="h-px flex-1 bg-border" />
+            </div>
 
-        <button
-          type="button"
-          onClick={handleGoogle}
-          className="w-full inline-flex items-center justify-center rounded-full border border-input bg-background px-6 py-3 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-        >
-          Continuer avec Google
-        </button>
+            <button
+              type="button"
+              onClick={handleGoogle}
+              className="inline-flex w-full items-center justify-center rounded-full border border-input bg-background px-6 py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              Continuer avec Google
+            </button>
+          </>
+        ) : null}
 
         <p className="mt-8 text-center text-sm text-muted-foreground">
           <Link to="/" className="hover:text-foreground transition-colors">
