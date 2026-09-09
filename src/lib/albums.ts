@@ -22,3 +22,10 @@ export interface Photo {
 export interface PhotoWithSignedUrl extends Photo {
   signedUrl: string;
 }
+
+/** Album enrichi pour la bibliothèque : nombre de photos et vignette de couverture. */
+export interface AlbumPreview extends Album {
+  photo_count: number;
+  /** URL signée de la première photo, `null` si l'album est vide. */
+  cover_url: string | null;
+}

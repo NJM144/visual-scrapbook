@@ -7,7 +7,11 @@
 /*
  * Design system definition.
  *
- * Editorial tactile minimal — warm canvas, deep ink, muted accent.
+ * Terre & soleil — ivoire chaud, encre brune, terracotta et or de savane.
+ *
+ * La palette d'origine (taupe très désaturé) rendait l'interface éteinte à côté
+ * des photographies. Les accents sont désormais franchement chromatiques :
+ * c'est ce qui donne au site sa chaleur.
  */
 
 @theme inline {
@@ -60,16 +64,22 @@
   --color-ink: var(--ink);
   --color-taupe: var(--taupe);
   --color-canvas-subtle: var(--canvas-subtle);
+  --color-terre: var(--terre);
+  --color-soleil: var(--soleil);
+  --color-acacia: var(--acacia);
 }
 
 :root {
   --radius: 0.75rem;
 
-  /* Editorial tactile minimal palette */
-  --canvas: oklch(0.985 0.003 85);
-  --ink: oklch(0.235 0.008 80);
-  --taupe: oklch(0.63 0.055 55);
-  --canvas-subtle: oklch(0.94 0.01 85);
+  /* Palette « terre & soleil » */
+  --canvas: oklch(0.982 0.012 78); /* ivoire chaud */
+  --ink: oklch(0.235 0.024 48); /* brun profond, jamais un gris neutre */
+  --terre: oklch(0.585 0.152 42); /* terracotta : accent principal */
+  --soleil: oklch(0.795 0.145 74); /* or de fin de journée */
+  --acacia: oklch(0.455 0.078 158); /* vert feuillage, pour équilibrer */
+  --taupe: var(--terre); /* compat : l'ancien nom pointe sur le nouvel accent */
+  --canvas-subtle: oklch(0.945 0.022 74);
 
   --background: var(--canvas);
   --foreground: var(--ink);
@@ -82,19 +92,19 @@
   --secondary: var(--canvas-subtle);
   --secondary-foreground: var(--ink);
   --muted: var(--canvas-subtle);
-  --muted-foreground: oklch(0.55 0.02 80);
-  --accent: var(--taupe);
+  --muted-foreground: oklch(0.535 0.032 52);
+  --accent: var(--terre);
   --accent-foreground: var(--canvas);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(0.78 0.01 80 / 0.35);
-  --input: oklch(0.78 0.01 80 / 0.25);
-  --ring: var(--taupe);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+  --border: oklch(0.72 0.035 58 / 0.3);
+  --input: oklch(0.72 0.035 58 / 0.22);
+  --ring: var(--terre);
+  --chart-1: var(--terre);
+  --chart-2: var(--soleil);
+  --chart-3: var(--acacia);
+  --chart-4: oklch(0.68 0.115 28);
+  --chart-5: oklch(0.72 0.09 96);
   --sidebar: var(--canvas);
   --sidebar-foreground: var(--ink);
   --sidebar-primary: var(--ink);
@@ -102,37 +112,37 @@
   --sidebar-accent: var(--canvas-subtle);
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: var(--border);
-  --sidebar-ring: var(--taupe);
+  --sidebar-ring: var(--terre);
 }
 
 .dark {
   --background: var(--ink);
   --foreground: var(--canvas);
-  --card: oklch(0.28 0.01 80);
+  --card: oklch(0.285 0.026 46);
   --card-foreground: var(--canvas);
-  --popover: oklch(0.28 0.01 80);
+  --popover: oklch(0.285 0.026 46);
   --popover-foreground: var(--canvas);
   --primary: var(--canvas);
   --primary-foreground: var(--ink);
-  --secondary: oklch(0.33 0.015 80);
+  --secondary: oklch(0.335 0.03 48);
   --secondary-foreground: var(--canvas);
-  --muted: oklch(0.33 0.015 80);
-  --muted-foreground: oklch(0.7 0.02 80);
-  --accent: var(--taupe);
+  --muted: oklch(0.335 0.03 48);
+  --muted-foreground: oklch(0.715 0.032 62);
+  --accent: oklch(0.68 0.145 46);
   --accent-foreground: var(--canvas);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.984 0.003 247.858);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: var(--taupe);
-  --sidebar: oklch(0.28 0.01 80);
+  --ring: oklch(0.68 0.145 46);
+  --sidebar: oklch(0.285 0.026 46);
   --sidebar-foreground: var(--canvas);
   --sidebar-primary: var(--canvas);
   --sidebar-primary-foreground: var(--ink);
-  --sidebar-accent: oklch(0.33 0.015 80);
+  --sidebar-accent: oklch(0.335 0.03 48);
   --sidebar-accent-foreground: var(--canvas);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: var(--taupe);
+  --sidebar-ring: oklch(0.68 0.145 46);
 }
 
 @layer base {
@@ -146,7 +156,12 @@
     font-family: var(--font-sans);
   }
 
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     font-family: var(--font-serif);
   }
 }

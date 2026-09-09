@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import type { Album, PhotoWithSignedUrl } from "./albums";
+import type { Album, AlbumPreview, PhotoWithSignedUrl } from "./albums";
 
 export const getAlbums = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -39,7 +39,7 @@ export const createAlbum = createServerFn({ method: "POST" })
         title: z.string().min(1).max(120),
         description: z.string().max(500).optional(),
       })
-      .parse(data)
+      .parse(data),
   )
   .handler(async ({ context, data }): Promise<Album> => {
     const { data: album, error } = await context.supabase
@@ -80,7 +80,7 @@ export const getPhotos = createServerFn({ method: "GET" })
           ...photo,
           signedUrl: signed?.signedUrl ?? "",
         };
-      })
+      }),
     );
 
     return withUrls;
@@ -94,8 +94,9 @@ export const createPhoto = createServerFn({ method: "POST" })
         albumId: z.string().uuid(),
         storagePath: z.string().min(1),
         caption: z.string().max(300).optional(),
+        orderIndex: z.number().int().min(0).max(100000).optional(),
       })
-      .parse(data)
+      .parse(data),
   )
   .handler(async ({ context, data }): Promise<PhotoWithSignedUrl> => {
     const { data: album, error: albumError } = await context.supabase
@@ -115,6 +116,7 @@ export const createPhoto = createServerFn({ method: "POST" })
         storage_path: data.storagePath,
         url: "",
         caption: data.caption ?? null,
+        order_index: data.orderIndex ?? 0,
       })
       .select()
       .single();
@@ -136,7 +138,7 @@ export const deletePhoto = createServerFn({ method: "POST" })
         photoId: z.string().uuid(),
         storagePath: z.string().min(1),
       })
-      .parse(data)
+      .parse(data),
   )
   .handler(async ({ context, data }) => {
     const { error: dbError } = await context.supabase
@@ -185,4 +187,63 @@ export const deleteAlbum = createServerFn({ method: "POST" })
 
     if (error) throw error;
     return { success: true };
+  });
+
+/**
+ * Bibliothèque : les albums accompagnés de leur nombre de photos et d'une
+ * vignette de couverture.
+ *
+ * `albums.cover_image` n'est pas exploitable ici — le bucket `photos` est privé,
+ * une URL brute n'y donne pas accès. On signe donc la première photo de chaque
+ * album. Tout est résolu en deux requêtes plutôt qu'une par album.
+ */
+export const getAlbumsWithPreview = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<AlbumPreview[]> => {
+    const { data: albums, error } = await context.supabase
+      .from("albums")
+      .select("*")
+      .eq("user_id", context.userId)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    if (!albums || albums.length === 0) return [];
+
+    const { data: photos, error: photosError } = await context.supabase
+      .from("photos")
+      .select("album_id, storage_path, order_index, created_at")
+      .eq("user_id", context.userId)
+      .order("order_index", { ascending: true })
+      .order("created_at", { ascending: true });
+
+    if (photosError) throw photosError;
+
+    const counts = new Map<string, number>();
+    const covers = new Map<string, string>();
+    for (const photo of photos ?? []) {
+      counts.set(photo.album_id, (counts.get(photo.album_id) ?? 0) + 1);
+      if (!covers.has(photo.album_id)) covers.set(photo.album_id, photo.storage_path);
+    }
+
+    const coverPaths = [...covers.values()];
+    const signedByPath = new Map<string, string>();
+
+    if (coverPaths.length > 0) {
+      const { data: signed } = await context.supabase.storage
+        .from("photos")
+        .createSignedUrls(coverPaths, 60 * 60 * 24);
+
+      for (const entry of signed ?? []) {
+        if (entry.path && entry.signedUrl) signedByPath.set(entry.path, entry.signedUrl);
+      }
+    }
+
+    return albums.map((album) => {
+      const coverPath = covers.get(album.id);
+      return {
+        ...album,
+        photo_count: counts.get(album.id) ?? 0,
+        cover_url: coverPath ? (signedByPath.get(coverPath) ?? null) : null,
+      };
+    });
   });

@@ -13,6 +13,7 @@ import { Toaster } from "sonner";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { useAuth } from "@/hooks/use-auth";
+import { CREDITS } from "@/lib/gallery";
 
 function NotFoundComponent() {
   return (
@@ -80,10 +81,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Anthologie — Vos albums photos" },
-      { name: "description", content: "Créez et partagez vos albums photos dans un espace calme et élégant." },
+      {
+        name: "description",
+        content: "Créez et partagez vos albums photos dans un espace calme et élégant.",
+      },
       { name: "author", content: "Anthologie" },
       { property: "og:title", content: "Anthologie — Vos albums photos" },
-      { property: "og:description", content: "Créez et partagez vos albums photos dans un espace calme et élégant." },
+      {
+        property: "og:description",
+        content: "Créez et partagez vos albums photos dans un espace calme et élégant.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -171,15 +178,15 @@ function Header() {
           </Link>
           {loading ? null : user ? (
             <Link
-              to="/albums/new"
-              className="text-sm font-medium bg-primary text-primary-foreground px-4 py-2 rounded-full ring-1 ring-primary hover:bg-primary/90 transition-colors"
+              to="/albums/import"
+              className="rounded-full bg-terre px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-terre/90"
             >
-              Créer un album
+              Importer
             </Link>
           ) : (
             <Link
               to="/auth"
-              className="text-sm font-medium bg-primary text-primary-foreground px-4 py-2 rounded-full ring-1 ring-primary hover:bg-primary/90 transition-colors"
+              className="rounded-full bg-terre px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-terre/90"
             >
               Se connecter
             </Link>
@@ -197,7 +204,8 @@ function Footer() {
         <div className="max-w-[40ch]">
           <span className="font-serif text-xl mb-4 block text-foreground">Anthologie</span>
           <p className="text-sm text-muted-foreground">
-            Conçu pour l’observateur patient. Construisez votre héritage numérique une image à la fois.
+            Conçu pour l’observateur patient. Construisez votre héritage numérique une image à la
+            fois.
           </p>
         </div>
         <div className="flex gap-16">
@@ -208,7 +216,10 @@ function Footer() {
             <Link to="/" className="text-sm text-foreground/70 hover:text-accent transition-colors">
               Accueil
             </Link>
-            <Link to="/albums" className="text-sm text-foreground/70 hover:text-accent transition-colors">
+            <Link
+              to="/albums"
+              className="text-sm text-foreground/70 hover:text-accent transition-colors"
+            >
               Albums
             </Link>
           </div>
@@ -216,15 +227,52 @@ function Footer() {
             <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60">
               Compte
             </span>
-            <Link to="/auth" className="text-sm text-foreground/70 hover:text-accent transition-colors">
+            <Link
+              to="/auth"
+              className="text-sm text-foreground/70 hover:text-accent transition-colors"
+            >
               Se connecter
             </Link>
-            <Link to="/albums/new" className="text-sm text-foreground/70 hover:text-accent transition-colors">
-              Créer un album
+            <Link
+              to="/albums/import"
+              className="text-sm text-foreground/70 transition-colors hover:text-accent"
+            >
+              Importer mes photos
             </Link>
           </div>
         </div>
       </div>
+
+      <PhotoCredits />
     </footer>
+  );
+}
+
+/**
+ * Mention des auteurs des paysages du site. Les licences CC BY-SA l'exigent :
+ * si vous remplacez les images, mettez cette liste à jour en conséquence.
+ */
+function PhotoCredits() {
+  return (
+    <div className="mx-auto mt-12 max-w-6xl border-t border-border px-6 pt-6">
+      <p className="text-xs leading-relaxed text-muted-foreground/70">
+        Paysages :{" "}
+        {CREDITS.map((image, index) => (
+          <span key={image.src}>
+            {index > 0 ? " · " : ""}
+            <a
+              href={image.source}
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-2 transition-colors hover:text-foreground"
+            >
+              {image.place}
+            </a>{" "}
+            — {image.author} ({image.license})
+          </span>
+        ))}
+        . Via Wikimedia Commons.
+      </p>
+    </div>
   );
 }
