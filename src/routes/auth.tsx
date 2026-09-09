@@ -33,9 +33,9 @@ function AuthPage() {
   const navigate = useNavigate();
 
   // Renseigné après montage : window n'existe pas pendant le rendu serveur.
-  const [googleAvailable, setGoogleAvailable] = useState(false);
+  const [onLovable, setOnLovable] = useState(false);
   useEffect(() => {
-    setGoogleAvailable(supportsLovableOAuth(window.location.hostname));
+    setOnLovable(supportsLovableOAuth(window.location.hostname));
   }, []);
 
   useEffect(() => {
@@ -69,16 +69,43 @@ function AuthPage() {
     }
   };
 
+  /**
+   * Deux chemins, selon l'hébergement.
+   *
+   * Sur Lovable, on garde le SDK maison : il passe par /~oauth/initiate, une
+   * route que seule cette plateforme sert, et il fonctionne sans que le projet
+   * Supabase ait à déclarer quoi que ce soit.
+   *
+   * Partout ailleurs cette route n'existe pas — le bouton menait à un 404. On
+   * utilise donc le fournisseur Google de Supabase, qui doit être activé dans
+   * le projet (Authentication → Providers → Google).
+   */
   const handleGoogle = async () => {
-    const result = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: window.location.origin,
-    });
-    if (result.error) {
-      toast.error(result.error.message);
-      return;
+    setBusy(true);
+    try {
+      if (onLovable) {
+        const result = await lovable.auth.signInWithOAuth("google", {
+          redirect_uri: window.location.origin,
+        });
+        if (result.error) {
+          toast.error(result.error.message);
+          return;
+        }
+        const { data } = await supabase.auth.getSession();
+        if (data.session) navigate({ to: "/albums" });
+        return;
+      }
+
+      // Redirige le navigateur vers Google ; au retour, use-auth récupère la
+      // session et l'effet plus haut renvoie vers /albums.
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: window.location.origin + "/albums" },
+      });
+      if (error) toast.error(error.message);
+    } finally {
+      setBusy(false);
     }
-    const { data } = await supabase.auth.getSession();
-    if (data.session) navigate({ to: "/albums" });
   };
 
   return (
@@ -143,23 +170,20 @@ function AuthPage() {
           </button>
         </form>
 
-        {googleAvailable ? (
-          <>
-            <div className="my-8 flex items-center gap-4">
-              <span className="h-px flex-1 bg-border" />
-              <span className="text-xs uppercase tracking-widest text-muted-foreground/60">ou</span>
-              <span className="h-px flex-1 bg-border" />
-            </div>
+        <div className="my-8 flex items-center gap-4">
+          <span className="h-px flex-1 bg-border" />
+          <span className="text-xs uppercase tracking-widest text-muted-foreground/60">ou</span>
+          <span className="h-px flex-1 bg-border" />
+        </div>
 
-            <button
-              type="button"
-              onClick={handleGoogle}
-              className="inline-flex w-full items-center justify-center rounded-full border border-input bg-background px-6 py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              Continuer avec Google
-            </button>
-          </>
-        ) : null}
+        <button
+          type="button"
+          onClick={handleGoogle}
+          disabled={busy}
+          className="inline-flex w-full items-center justify-center rounded-full border border-input bg-background px-6 py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-60"
+        >
+          Continuer avec Google
+        </button>
 
         <p className="mt-8 text-center text-sm text-muted-foreground">
           <Link to="/" className="hover:text-foreground transition-colors">
