@@ -15,9 +15,9 @@ function AlbumsIndex() {
   });
 
   return (
-    <div className="px-6 py-16">
+    <div className="px-4 py-8 sm:px-6 sm:py-16">
       <div className="mx-auto max-w-6xl">
-        <div className="mb-12 flex flex-wrap items-end justify-between gap-6">
+        <div className="mb-8 flex flex-wrap items-end justify-between gap-5 sm:mb-12 sm:gap-6">
           <div>
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-[0.18em] text-terre">
               Bibliothèque
@@ -41,7 +41,7 @@ function AlbumsIndex() {
         </div>
 
         {isLoading ? (
-          <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:gap-8 md:grid-cols-3">
             {[0, 1, 2].map((i) => (
               <div key={i} className="aspect-[4/5] animate-pulse rounded-2xl bg-muted" />
             ))}
@@ -53,7 +53,7 @@ function AlbumsIndex() {
             <h3 className="font-serif text-2xl text-foreground">Aucun album pour l’instant</h3>
             <p className="mx-auto mt-3 max-w-[46ch] text-sm text-muted-foreground">
               Le plus simple : importez les photos de votre téléphone, elles se rangeront toutes
-              seules par voyage et par date.
+              seules par événement et par date.
             </p>
             <Link
               to="/albums/import"
@@ -63,7 +63,7 @@ function AlbumsIndex() {
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:gap-8 md:grid-cols-3">
             {data.map((album) => (
               <Link
                 key={album.id}

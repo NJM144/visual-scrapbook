@@ -109,7 +109,7 @@ function AuthPage() {
   };
 
   return (
-    <div className="px-6 py-20">
+    <div className="px-6 py-10 sm:py-20">
       <div className="mx-auto w-full max-w-md">
         <h1 className="font-serif text-4xl text-foreground">
           {mode === "signin" ? "Se connecter" : "Créer un compte"}
@@ -141,6 +141,11 @@ function AuthPage() {
             <input
               type="email"
               required
+              autoComplete="email"
+              inputMode="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="rounded-xl border border-input bg-background px-4 py-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
@@ -155,6 +160,8 @@ function AuthPage() {
               type="password"
               required
               minLength={6}
+              // Laisse le téléphone proposer le mot de passe enregistré, ou en générer un.
+              autoComplete={mode === "signin" ? "current-password" : "new-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="rounded-xl border border-input bg-background px-4 py-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"

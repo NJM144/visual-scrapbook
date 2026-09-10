@@ -4,9 +4,11 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
+import { House, ImagePlus, Images, ShieldCheck } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Toaster } from "sonner";
@@ -81,7 +83,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      // viewport-fit=cover : l'appli occupe tout l'écran, encoche comprise ; les
+      // marges de sécurité sont gérées en CSS (env(safe-area-inset-*)).
+      { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
+      { name: "theme-color", content: "#FBF6EE" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-title", content: "Anthologie" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "default" },
       { title: "Anthologie — Vos albums photos" },
       {
         name: "description",
@@ -112,6 +121,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         href: "https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif&display=swap",
       },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "manifest", href: "/manifest.webmanifest" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
     ],
   }),
   shellComponent: RootShell,
@@ -136,23 +147,90 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const { user } = useAuth();
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="min-h-screen flex flex-col">
+      <div className="flex min-h-dvh flex-col">
         <Header />
-        <main className="flex-1">
+        {/* Sur téléphone, la navigation du bas recouvre le pied de page :
+            on lui réserve sa hauteur. */}
+        <main
+          className={
+            "flex-1 " +
+            (user ? "pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom))] sm:pb-0" : "")
+          }
+        >
           <Outlet />
         </main>
         <Footer />
       </div>
+      {user ? <MobileNav /> : null}
       <Toaster
         position="bottom-center"
+        mobileOffset={{ bottom: "calc(5rem + env(safe-area-inset-bottom))" }}
         toastOptions={{
           className: "bg-background text-foreground border border-border shadow-lg",
         }}
       />
     </QueryClientProvider>
+  );
+}
+
+/**
+ * Navigation du bas, sur téléphone : là où tombe le pouce. Les liens de
+ * l'en-tête, en haut de l'écran, étaient hors de portée d'une main.
+ */
+function MobileNav() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const fetchIsAdmin = useServerFn(getIsAdmin);
+  const { data: isAdmin } = useQuery({
+    queryKey: ["is-admin"],
+    queryFn: () => fetchIsAdmin(),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const importing = pathname.startsWith("/albums/import");
+  const items = [
+    { to: "/", label: "Accueil", icon: House, active: pathname === "/" },
+    {
+      to: "/albums",
+      label: "Albums",
+      icon: Images,
+      active: pathname.startsWith("/albums") && !importing,
+    },
+    { to: "/albums/import", label: "Importer", icon: ImagePlus, active: importing },
+    ...(isAdmin
+      ? [{ to: "/admin", label: "Admin", icon: ShieldCheck, active: pathname === "/admin" }]
+      : []),
+  ] as const;
+
+  return (
+    <nav
+      aria-label="Navigation principale"
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md sm:hidden"
+    >
+      <div className="flex h-[var(--mobile-nav-height)] items-stretch">
+        {items.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.to}
+              to={item.to}
+              aria-current={item.active ? "page" : undefined}
+              className={
+                "flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors " +
+                (item.active ? "text-terre" : "text-foreground/60")
+              }
+            >
+              <Icon className="size-6" strokeWidth={item.active ? 2.2 : 1.8} aria-hidden />
+              {item.label}
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
   );
 }
 
@@ -171,7 +249,7 @@ function Header() {
   });
 
   return (
-    <nav className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-border">
+    <nav className="sticky top-0 z-50 border-b border-border bg-background/80 pt-[env(safe-area-inset-top)] backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
         <Link
           to="/"
@@ -188,16 +266,20 @@ function Header() {
           >
             Accueil
           </Link>
+          {/* Connecté, ces liens passent dans la navigation du bas sur téléphone. */}
           <Link
             to="/albums"
-            className="text-sm font-medium text-foreground/70 hover:text-foreground transition-colors"
+            className={
+              "text-sm font-medium text-foreground/70 transition-colors hover:text-foreground " +
+              (user ? "hidden sm:inline" : "")
+            }
           >
             Albums
           </Link>
           {isAdmin ? (
             <Link
               to="/admin"
-              className="text-sm font-medium text-foreground/70 transition-colors hover:text-foreground"
+              className="hidden text-sm font-medium text-foreground/70 transition-colors hover:text-foreground sm:inline"
             >
               Administration
             </Link>
@@ -205,7 +287,7 @@ function Header() {
           {loading ? null : user ? (
             <Link
               to="/albums/import"
-              className="shrink-0 rounded-full bg-terre px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-terre/90"
+              className="hidden shrink-0 rounded-full bg-terre px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-terre/90 sm:inline-flex"
             >
               Importer
             </Link>
@@ -225,7 +307,7 @@ function Header() {
 
 function Footer() {
   return (
-    <footer className="py-16 border-t border-border">
+    <footer className="border-t border-border py-10 sm:py-16">
       <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row justify-between gap-12">
         <div className="max-w-[40ch]">
           <span className="font-serif text-xl mb-4 block text-foreground">Anthologie</span>
@@ -234,7 +316,8 @@ function Footer() {
             fois.
           </p>
         </div>
-        <div className="flex gap-16">
+        {/* Sur téléphone, ces liens doublonnent l'en-tête et la navigation du bas. */}
+        <div className="hidden gap-16 sm:flex">
           <div className="flex flex-col gap-3">
             <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60">
               Navigation
@@ -275,14 +358,15 @@ function Footer() {
 }
 
 /**
- * Mention des auteurs des paysages du site. Les licences CC BY-SA l'exigent :
- * si vous remplacez les images, mettez cette liste à jour en conséquence.
+ * Mention des auteurs des photographies du site. Les licences CC BY-SA
+ * l'exigent : si vous remplacez les images, mettez cette liste à jour en
+ * conséquence.
  */
 function PhotoCredits() {
   return (
     <div className="mx-auto mt-12 max-w-6xl border-t border-border px-6 pt-6">
       <p className="text-xs leading-relaxed text-muted-foreground/70">
-        Paysages :{" "}
+        Photographies :{" "}
         {CREDITS.map((image, index) => (
           <span key={image.src}>
             {index > 0 ? " · " : ""}
@@ -292,7 +376,7 @@ function PhotoCredits() {
               rel="noreferrer"
               className="underline underline-offset-2 transition-colors hover:text-foreground"
             >
-              {image.place}
+              {image.event}, {image.place}
             </a>{" "}
             — {image.author} ({image.license})
           </span>

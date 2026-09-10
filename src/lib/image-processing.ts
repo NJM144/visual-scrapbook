@@ -49,12 +49,12 @@ export interface ProcessedImage {
  * Décode le fichier en respectant l'orientation EXIF, faute de quoi les photos
  * prises en portrait arrivent couchées.
  */
-async function decode(file: File): Promise<ImageBitmap> {
+async function decode(source: Blob): Promise<ImageBitmap> {
   try {
-    return await createImageBitmap(file, { imageOrientation: "from-image" });
+    return await createImageBitmap(source, { imageOrientation: "from-image" });
   } catch {
     // Certains navigateurs ignorent l'option et lèvent : on retente sans.
-    return await createImageBitmap(file);
+    return await createImageBitmap(source);
   }
 }
 
@@ -138,6 +138,29 @@ export async function createThumbnail(file: File): Promise<string | null> {
     const { width, height } = scaledSize(bitmap.width, bitmap.height, THUMBNAIL_DIMENSION);
     const blob = await toBlob(draw(bitmap, width, height), THUMBNAIL_QUALITY);
     return blob ? URL.createObjectURL(blob) : null;
+  } catch {
+    return null;
+  } finally {
+    bitmap.close();
+  }
+}
+
+/** Miniature stockée à côté de chaque photo : 640 px couvrent une grille de téléphone. */
+const STORAGE_THUMBNAIL_DIMENSION = 640;
+const STORAGE_THUMBNAIL_QUALITY = 0.72;
+
+/** Miniature JPEG d'une image, pour le stockage. `null` si le décodage échoue. */
+export async function createStorageThumbnail(source: Blob): Promise<Blob | null> {
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await decode(source);
+  } catch {
+    return null;
+  }
+
+  try {
+    const { width, height } = scaledSize(bitmap.width, bitmap.height, STORAGE_THUMBNAIL_DIMENSION);
+    return await toBlob(draw(bitmap, width, height), STORAGE_THUMBNAIL_QUALITY);
   } catch {
     return null;
   } finally {

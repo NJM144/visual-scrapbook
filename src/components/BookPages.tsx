@@ -14,6 +14,7 @@ import type { Framing } from "@/lib/photo-framing";
 export interface ViewerPhoto {
   id: string;
   signedUrl: string;
+  thumbUrl?: string | null;
   caption: string | null;
   framing: Framing;
 }
@@ -28,6 +29,8 @@ export function BookPages({
   title,
   subtitle,
   dateLabel,
+  onInsertAfter,
+  onRemove,
 }: {
   plan: BookPlan;
   theme: BookTheme;
@@ -35,12 +38,23 @@ export function BookPages({
   title: string;
   subtitle: string;
   dateLabel: string;
+  /**
+   * Ajout et suppression de pages depuis l'aperçu. Les pages sont désignées
+   * par leur rang parmi les pages de photos — la page de titre n'en fait pas
+   * partie. Absents, l'aperçu reste en lecture seule.
+   */
+  onInsertAfter?: ((photoPage: number) => void) | undefined;
+  onRemove?: ((photoPage: number) => void) | undefined;
 }) {
   const { format } = plan;
 
+  // Rang de chaque page parmi les pages de photos, -1 pour titre et colophon.
+  let seen = -1;
+  const photoPageOf = plan.pages.map((page) => (page.kind === "photos" ? (seen += 1) : -1));
+
   return (
     <div className="-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-3 sm:mx-0 sm:grid sm:snap-none sm:grid-cols-2 sm:gap-6 sm:overflow-visible sm:px-0">
-      {plan.pages.map((page) => (
+      {plan.pages.map((page, pageIndex) => (
         <figure key={page.number} className="w-[78vw] shrink-0 snap-center sm:w-auto">
           <div
             className="relative overflow-hidden shadow-md ring-1 ring-black/10"
@@ -105,9 +119,17 @@ export function BookPages({
                     }}
                   >
                     <img
-                      src={photo.signedUrl}
+                      src={photo.thumbUrl || photo.signedUrl}
+                      // La miniature sur téléphone, l'original sur grand écran.
+                      srcSet={
+                        photo.thumbUrl
+                          ? photo.thumbUrl + " 640w, " + photo.signedUrl + " 2048w"
+                          : undefined
+                      }
+                      sizes="(max-width: 640px) 40vw, 45vw"
                       alt={caption || "Photographie"}
                       loading="lazy"
+                      decoding="async"
                       className="size-full"
                       style={{
                         objectFit: photo.framing.fit,
@@ -136,6 +158,12 @@ export function BookPages({
               );
             })}
 
+            {page.kind === "photos" && page.slots.every((slot) => !photos[slot.photoIndex]) ? (
+              <span className="absolute inset-0 flex items-center justify-center px-[12%] text-center text-xs text-black/35">
+                Page vide — placez-y une photo depuis l’onglet Pages.
+              </span>
+            ) : null}
+
             {page.kind === "photos" ? (
               <span
                 className="absolute inset-x-0 text-center text-[clamp(0.35rem,1.3cqw,0.55rem)]"
@@ -149,8 +177,37 @@ export function BookPages({
             ) : null}
           </div>
 
-          <figcaption className="mt-2 text-center text-xs text-muted-foreground">
-            {page.kind === "blanche" ? "Page blanche" : "Page " + page.number}
+          <figcaption className="mt-2 flex min-h-9 items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span className="pl-1">
+              {page.kind === "titre"
+                ? "Page de titre"
+                : page.kind === "colophon"
+                  ? "Fin du livre"
+                  : "Page " + page.number}
+            </span>
+            {page.kind === "photos" && (onInsertAfter || onRemove) ? (
+              <span className="flex gap-1.5">
+                {onInsertAfter ? (
+                  <button
+                    type="button"
+                    onClick={() => onInsertAfter(photoPageOf[pageIndex] ?? 0)}
+                    className="h-9 rounded-full border border-input px-3 text-xs text-foreground transition-colors hover:bg-muted"
+                  >
+                    + Page après
+                  </button>
+                ) : null}
+                {onRemove ? (
+                  <button
+                    type="button"
+                    onClick={() => onRemove(photoPageOf[pageIndex] ?? 0)}
+                    aria-label={"Supprimer la page " + page.number}
+                    className="h-9 rounded-full border border-input px-3 text-xs text-destructive transition-colors hover:bg-destructive/10"
+                  >
+                    Supprimer
+                  </button>
+                ) : null}
+              </span>
+            ) : null}
           </figcaption>
         </figure>
       ))}

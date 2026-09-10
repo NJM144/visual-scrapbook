@@ -36,7 +36,7 @@ export interface BookPlan {
   pages: BookPage[];
   /** Pages effectivement occupées, avant complément en multiple de 4. */
   usedPages: number;
-  /** Pages blanches ajoutées pour atteindre le multiple de 4. */
+  /** Pages blanches ajoutées pour l'imprimeur (voir withPrintPadding) ; 0 à l'écran. */
   paddingPages: number;
   photoCount: number;
 }
@@ -178,19 +178,24 @@ export function planBook(
 
   pages.push({ kind: "colophon", number: pages.length + 1, slots: [] });
 
-  const usedPages = pages.length;
+  return { format, pages, usedPages: pages.length, paddingPages: 0, photoCount };
+}
+
+/**
+ * Complète le livre pour l'imprimeur : 24 pages au moins, en multiple de 4.
+ *
+ * Ces pages blanches ne concernent que le fichier d'impression — une reliure
+ * ne sait pas faire autrement. À l'écran, l'auteur ne voit que les pages qu'il
+ * a composées ; il peut en ajouter pour remplir celles-ci.
+ */
+export function withPrintPadding(plan: BookPlan): BookPlan {
+  const usedPages = plan.pages.length;
   const total = normalizePageCount(usedPages);
+  const pages = [...plan.pages];
   for (let n = usedPages; n < total; n += 1) {
     pages.push({ kind: "blanche", number: n + 1, slots: [] });
   }
-
-  return {
-    format,
-    pages,
-    usedPages,
-    paddingPages: total - usedPages,
-    photoCount,
-  };
+  return { ...plan, pages, usedPages, paddingPages: total - usedPages };
 }
 
 /* ------------------------------------------------- disposition manuelle */
@@ -284,11 +289,11 @@ export function planFromLayout(
 
   pages.push({ kind: "colophon", number: pages.length + 1, slots: [] });
 
-  const usedPages = pages.length;
-  const total = normalizePageCount(usedPages);
-  for (let n = usedPages; n < total; n += 1) {
-    pages.push({ kind: "blanche", number: n + 1, slots: [] });
-  }
-
-  return { format, pages, usedPages, paddingPages: total - usedPages, photoCount: photoIds.length };
+  return {
+    format,
+    pages,
+    usedPages: pages.length,
+    paddingPages: 0,
+    photoCount: photoIds.length,
+  };
 }

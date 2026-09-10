@@ -16,11 +16,17 @@ import {
   updatePhotoFraming,
   updatePhotoMeta,
 } from "@/lib/albums.functions";
-import { BOOK_THEMES, findTheme } from "@/lib/book-themes";
-import { PRINT_FORMATS, findFormat, spineWidthMm, effectiveDpi } from "@/lib/print-formats";
-import { layoutFromPlan, planBook, planFromLayout, type AlbumLayout } from "@/lib/book-layout";
+import { findTheme } from "@/lib/book-themes";
+import { findFormat, spineWidthMm, effectiveDpi } from "@/lib/print-formats";
+import {
+  layoutFromPlan,
+  planBook,
+  planFromLayout,
+  withPrintPadding,
+  type AlbumLayout,
+} from "@/lib/book-layout";
 import { CoverPreview } from "@/components/CoverPreview";
-import { COVER_TEMPLATES } from "@/lib/cover-templates";
+import { BookStylePicker } from "@/components/BookStylePicker";
 import { BookPages } from "@/components/BookPages";
 import { PhotoFramer } from "@/components/PhotoFramer";
 import { PageComposer } from "@/components/PageComposer";
@@ -51,11 +57,16 @@ export const Route = createFileRoute("/_authenticated/albums/book/$albumId")({
 
 type Tab = "apercu" | "pages" | "mise-en-page" | "apparence";
 
+/**
+ * Onglets dans l'ordre du travail. Le coffret et le thème ouvrent la marche :
+ * le format décide du découpage des pages et le thème de leurs marges, les
+ * choisir après avoir composé défaisait la composition.
+ */
 const TABS: { id: Tab; label: string }[] = [
-  { id: "apercu", label: "Feuilleter" },
-  { id: "pages", label: "Pages" },
+  { id: "apparence", label: "Coffret et thème" },
   { id: "mise-en-page", label: "Photos et légendes" },
-  { id: "apparence", label: "Thème et format" },
+  { id: "pages", label: "Pages" },
+  { id: "apercu", label: "Feuilleter" },
 ];
 
 function download(blob: Blob, filename: string) {
@@ -113,7 +124,7 @@ function BookStudio() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const [tab, setTab] = useState<Tab>("apercu");
+  const [tab, setTab] = useState<Tab>("apparence");
   const [themeId, setThemeId] = useState("savane");
   const [formatId, setFormatId] = useState("carre_20");
   const [coverTitle, setCoverTitle] = useState("");
@@ -224,7 +235,44 @@ function BookStudio() {
     }
     return map;
   }, [plan]);
-  const spine = spineWidthMm(plan.pages.length, true);
+  // Ce que reçoit l'imprimeur : le livre complété en pages blanches. L'écran,
+  // lui, ne montre que les pages composées.
+  const printPlan = useMemo(() => withPrintPadding(plan), [plan]);
+  const spine = spineWidthMm(printPlan.pages.length, true);
+
+  /**
+   * Ajout et suppression de pages depuis l'aperçu.
+   *
+   * On part de la disposition affichée, photos orphelines comprises : chaque
+   * page vue correspond ainsi à une page modifiable, au même rang.
+   */
+  const editLayout = (mutate: (pages: AlbumLayout["pages"]) => AlbumLayout["pages"]) => {
+    setLayout({ pages: mutate(layoutFromPlan(plan, photoIds).pages) });
+    setLayoutDirty(true);
+  };
+
+  const insertPageAfter = (photoPage: number) =>
+    editLayout((pages) => [
+      ...pages.slice(0, photoPage + 1),
+      { id: "p" + Date.now().toString(36), slots: [null] },
+      ...pages.slice(photoPage + 1),
+    ]);
+
+  const removeBookPage = (photoPage: number) => {
+    const page = layoutFromPlan(plan, photoIds).pages[photoPage];
+    const filled = page?.slots.filter(Boolean).length ?? 0;
+    if (
+      filled > 0 &&
+      !window.confirm(
+        "Cette page contient " +
+          filled +
+          " photo(s). Elles seront replacées à la fin du livre. Continuer ?",
+      )
+    ) {
+      return;
+    }
+    editLayout((pages) => pages.filter((_, index) => index !== photoPage));
+  };
   const coverPhoto = photos.find((photo) => photo.id === coverPhotoId) ?? photos[0];
   const coverDpi = effectiveDpi(2048, format.widthMm);
   const title = coverTitle.trim() || album?.title || "Album";
@@ -323,7 +371,9 @@ function BookStudio() {
     try {
       const results: PhotoStats[] = [];
       for (const photo of photos) {
-        const stats = await analyzePhoto(photo.id, photo.signedUrl);
+        // Proportions et couleurs se lisent aussi bien sur la miniature :
+        // inutile de faire télécharger chaque original au téléphone.
+        const stats = await analyzePhoto(photo.id, photo.thumbUrl || photo.signedUrl);
         if (stats) results.push(stats);
       }
       setAnalysis(results);
@@ -374,7 +424,8 @@ function BookStudio() {
         });
 
         try {
-          const thumbnail = await createAiThumbnail(photo.signedUrl);
+          // La miniature de 640 px suffit au modèle, qui travaille en 512.
+          const thumbnail = await createAiThumbnail(photo.thumbUrl || photo.signedUrl);
           if (!thumbnail) {
             failed += 1;
             continue;
@@ -491,6 +542,25 @@ function BookStudio() {
     }
   };
 
+  const goToTab = (next: Tab) => {
+    // Passer en disposition manuelle fige le découpage courant : sans cela
+    // l'auteur n'aurait rien à réarranger.
+    if (next === "pages" && !layout && photos.length > 0) {
+      setLayout(layoutFromPlan(autoPlan, photoIds));
+    }
+    setTab(next);
+  };
+
+  const nextTab = TABS[TABS.findIndex((item) => item.id === tab) + 1];
+
+  const continueTo = async (next: Tab) => {
+    // Le coffret et le thème conditionnent tout ce qui suit : on les enregistre
+    // en quittant l'étape plutôt que de compter sur un clic sur « Enregistrer ».
+    if (tab === "apparence" && isOwner) await handleSave();
+    goToTab(next);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   const handleExport = async () => {
     if (photos.length === 0) {
       toast.error("Cet album ne contient aucune photo.");
@@ -508,7 +578,7 @@ function BookStudio() {
       release = releaseExportCache;
 
       const result = await exportBook({
-        plan,
+        plan: printPlan,
         theme,
         photos: photos.map((photo) => ({
           id: photo.id,
@@ -551,7 +621,7 @@ function BookStudio() {
   }
 
   return (
-    <div className="px-4 py-8 sm:px-6 sm:py-12">
+    <div className="px-4 pb-32 pt-8 sm:px-6 sm:py-12">
       <div className="mx-auto max-w-6xl">
         <Link
           to="/albums/$albumId"
@@ -566,7 +636,7 @@ function BookStudio() {
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-[0.18em] text-terre">
               Mon livre
             </h2>
-            <h1 className="font-serif text-4xl text-foreground md:text-5xl">{title}</h1>
+            <h1 className="font-serif text-3xl text-foreground sm:text-4xl md:text-5xl">{title}</h1>
             <p className="mt-3 text-sm text-muted-foreground">
               {photos.length} photographie{photos.length > 1 ? "s" : ""} · {plan.pages.length} pages
               · {format.label}
@@ -576,7 +646,8 @@ function BookStudio() {
             type="button"
             onClick={handleSave}
             disabled={saving}
-            className="w-full shrink-0 rounded-full bg-terre px-6 py-3.5 text-sm font-medium text-white transition-colors hover:bg-terre/90 disabled:opacity-60 sm:w-auto"
+            // Sur téléphone, « Enregistrer » vit dans la barre du bas.
+            className="hidden shrink-0 rounded-full bg-terre px-6 py-3.5 text-sm font-medium text-white transition-colors hover:bg-terre/90 disabled:opacity-60 sm:block"
           >
             {saving
               ? "Enregistrement…"
@@ -593,19 +664,14 @@ function BookStudio() {
           </p>
         ) : null}
 
-        <div className="mb-8 -mx-4 flex gap-1 overflow-x-auto whitespace-nowrap border-b border-border px-4 sm:mx-0 sm:gap-2 sm:px-0">
-          {TABS.map((item) => (
+        {/* Onglets collés sous l'en-tête sur téléphone : on change d'étape sans
+            remonter tout le livre. */}
+        <div className="sticky top-[calc(4rem+env(safe-area-inset-top))] z-30 -mx-4 mb-8 flex gap-1 overflow-x-auto whitespace-nowrap border-b border-border bg-background/95 px-4 backdrop-blur sm:static sm:mx-0 sm:gap-2 sm:bg-transparent sm:px-0 sm:backdrop-blur-none">
+          {TABS.map((item, index) => (
             <button
               key={item.id}
               type="button"
-              onClick={() => {
-                // Passer en disposition manuelle fige le découpage courant :
-                // sans cela l'auteur n'aurait rien à réarranger.
-                if (item.id === "pages" && !layout && photos.length > 0) {
-                  setLayout(layoutFromPlan(autoPlan, photoIds));
-                }
-                setTab(item.id);
-              }}
+              onClick={() => goToTab(item.id)}
               className={
                 "-mb-px shrink-0 border-b-2 px-4 py-3.5 text-sm font-medium transition-colors " +
                 (tab === item.id
@@ -613,6 +679,7 @@ function BookStudio() {
                   : "border-transparent text-muted-foreground hover:text-foreground")
               }
             >
+              <span className="mr-1.5 text-muted-foreground/60">{index + 1}.</span>
               {item.label}
             </button>
           ))}
@@ -635,19 +702,33 @@ function BookStudio() {
                 Ajoutez des photos à l’album pour composer le livre.
               </p>
             ) : (
-              <BookPages
-                plan={plan}
-                theme={theme}
-                photos={photos.map((photo) => ({
-                  id: photo.id,
-                  signedUrl: photo.signedUrl,
-                  caption: photo.caption,
-                  framing: photo.framing,
-                }))}
-                title={title}
-                subtitle={coverSubtitle}
-                dateLabel={dateLabel}
-              />
+              <>
+                {printPlan.paddingPages > 0 ? (
+                  <p className="mb-6 rounded-2xl bg-muted/60 p-4 text-sm leading-relaxed text-muted-foreground">
+                    Une reliure demande au moins 24 pages, par multiples de 4 : à l’impression,{" "}
+                    {printPlan.paddingPages} page{printPlan.paddingPages > 1 ? "s" : ""} blanche
+                    {printPlan.paddingPages > 1 ? "s" : ""} complétera
+                    {printPlan.paddingPages > 1 ? "nt" : ""} la fin du livre. Ajoutez des pages pour
+                    les remplir.
+                  </p>
+                ) : null}
+                <BookPages
+                  plan={plan}
+                  theme={theme}
+                  photos={photos.map((photo) => ({
+                    id: photo.id,
+                    signedUrl: photo.signedUrl,
+                    thumbUrl: photo.thumbUrl,
+                    caption: photo.caption,
+                    framing: photo.framing,
+                  }))}
+                  title={title}
+                  subtitle={coverSubtitle}
+                  dateLabel={dateLabel}
+                  onInsertAfter={isOwner ? insertPageAfter : undefined}
+                  onRemove={isOwner ? removeBookPage : undefined}
+                />
+              </>
             )}
           </section>
         ) : null}
@@ -662,7 +743,11 @@ function BookStudio() {
               <>
                 <PageComposer
                   layout={layout}
-                  photos={photos.map((photo) => ({ id: photo.id, signedUrl: photo.signedUrl }))}
+                  photos={photos.map((photo) => ({
+                    id: photo.id,
+                    signedUrl: photo.signedUrl,
+                    thumbUrl: photo.thumbUrl,
+                  }))}
                   format={format}
                   theme={theme}
                   onChange={(next) => {
@@ -745,9 +830,10 @@ function BookStudio() {
                       {index + 1}
                     </span>
                     <img
-                      src={photo.signedUrl}
+                      src={photo.thumbUrl || photo.signedUrl}
                       alt=""
                       loading="lazy"
+                      decoding="async"
                       className="size-16 shrink-0 rounded-xl object-cover"
                     />
                     <input
@@ -870,8 +956,19 @@ function BookStudio() {
         {tab === "apparence" ? (
           <div className="grid gap-10 lg:grid-cols-[1fr_20rem]">
             <div className="space-y-10">
+              <BookStylePicker
+                formatId={formatId}
+                coverTemplateId={coverTemplateId}
+                themeId={themeId}
+                onFormatChange={setFormatId}
+                onCoverTemplateChange={setCoverTemplateId}
+                onThemeChange={setThemeId}
+                title={title}
+                photoUrl={coverPhoto?.signedUrl}
+              />
+
               <section className="rounded-3xl border border-terre/40 bg-terre/5 p-6">
-                <h3 className="font-serif text-2xl text-foreground">Analyse automatique</h3>
+                <h3 className="font-serif text-2xl text-foreground">Besoin d’un conseil ?</h3>
                 <p className="mt-2 max-w-[64ch] text-sm text-muted-foreground">
                   Vos photos sont mesurées dans le navigateur — orientations, couleurs dominantes,
                   perte au rognage — pour proposer le format qui coupe le moins et la palette qui
@@ -957,120 +1054,9 @@ function BookStudio() {
               </section>
 
               <section>
-                <h3 className="mb-1 font-serif text-2xl text-foreground">Couverture</h3>
-                <p className="mb-5 text-sm text-muted-foreground">
-                  La composition. Le thème, lui, en donne les couleurs — les deux se combinent
-                  librement.
-                </p>
-                <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:snap-none sm:gap-3 sm:overflow-visible sm:px-0 sm:grid-cols-3 lg:grid-cols-4">
-                  {COVER_TEMPLATES.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => setCoverTemplateId(option.id)}
-                      className={
-                        "w-40 shrink-0 snap-start rounded-2xl border p-3 text-left transition-colors sm:w-auto " +
-                        (coverTemplateId === option.id
-                          ? "border-terre bg-terre/5 ring-2 ring-terre/30"
-                          : "border-border hover:bg-muted")
-                      }
-                    >
-                      <span className="pointer-events-none block">
-                        <CoverPreview
-                          theme={theme}
-                          format={format}
-                          title={title}
-                          subtitle=""
-                          photoUrl={coverPhoto?.signedUrl}
-                          templateId={option.id}
-                          compact
-                        />
-                      </span>
-                      <span className="mt-2 block text-sm font-medium text-foreground">
-                        {option.label}
-                      </span>
-                      <span className="mt-0.5 hidden text-xs leading-snug text-muted-foreground sm:block">
-                        {option.description}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              <section>
-                <h3 className="mb-1 font-serif text-2xl text-foreground">Thème</h3>
-                <p className="mb-5 text-sm text-muted-foreground">
-                  Papier, encre, typographie et motif de couverture.
-                </p>
-                <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:snap-none sm:gap-3 sm:overflow-visible sm:px-0 sm:grid-cols-3 lg:grid-cols-5">
-                  {BOOK_THEMES.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => setThemeId(option.id)}
-                      title={option.description}
-                      className={
-                        "w-32 shrink-0 snap-start overflow-hidden rounded-2xl border text-left transition-colors sm:w-auto " +
-                        (themeId === option.id
-                          ? "border-terre ring-2 ring-terre/40"
-                          : "border-border hover:border-foreground/30")
-                      }
-                    >
-                      <span
-                        className="flex h-16 items-end gap-1 p-2"
-                        style={{ backgroundColor: option.coverBackground }}
-                      >
-                        <span
-                          className="size-4 rounded-full"
-                          style={{ backgroundColor: option.paper }}
-                        />
-                        <span
-                          className="size-4 rounded-full"
-                          style={{ backgroundColor: option.accent }}
-                        />
-                      </span>
-                      <span className="block px-3 py-2 text-sm font-medium text-foreground">
-                        {option.label}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              <section>
-                <h3 className="mb-1 font-serif text-2xl text-foreground">Format</h3>
-                <p className="mb-5 text-sm text-muted-foreground">
-                  Taille finie après coupe ; le fond perdu de 3 mm s’ajoute automatiquement.
-                </p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {PRINT_FORMATS.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => setFormatId(option.id)}
-                      className={
-                        "min-h-[5.5rem] rounded-2xl border p-4 text-left transition-colors " +
-                        (formatId === option.id
-                          ? "border-terre bg-terre/5"
-                          : "border-border hover:bg-muted")
-                      }
-                    >
-                      <span className="flex items-baseline justify-between gap-2">
-                        <span className="text-sm font-medium text-foreground">{option.label}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {option.widthMm} × {option.heightMm} mm
-                        </span>
-                      </span>
-                      <span className="mt-1 block text-xs leading-snug text-muted-foreground">
-                        {option.description}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              <section>
-                <h3 className="mb-1 font-serif text-2xl text-foreground">Couverture</h3>
+                <h3 className="mb-1 font-serif text-2xl text-foreground">
+                  Titre et photo de couverture
+                </h3>
                 <p className="mb-5 text-sm text-muted-foreground">
                   Le titre imprimé peut différer du nom de l’album dans l’application.
                 </p>
@@ -1115,9 +1101,10 @@ function BookStudio() {
                       }
                     >
                       <img
-                        src={photo.signedUrl}
+                        src={photo.thumbUrl || photo.signedUrl}
                         alt=""
                         loading="lazy"
+                        decoding="async"
                         className="size-full object-cover"
                       />
                     </button>
@@ -1138,8 +1125,12 @@ function BookStudio() {
 
               <dl className="rounded-2xl border border-border bg-card p-5 text-sm">
                 <div className="flex justify-between py-1">
-                  <dt className="text-muted-foreground">Pages</dt>
+                  <dt className="text-muted-foreground">Pages composées</dt>
                   <dd className="text-foreground">{plan.pages.length}</dd>
+                </div>
+                <div className="flex justify-between py-1">
+                  <dt className="text-muted-foreground">Pages imprimées</dt>
+                  <dd className="text-foreground">{printPlan.pages.length}</dd>
                 </div>
                 <div className="flex justify-between py-1">
                   <dt className="text-muted-foreground">Largeur du dos</dt>
@@ -1160,6 +1151,45 @@ function BookStudio() {
                 </p>
               ) : null}
             </aside>
+          </div>
+        ) : null}
+
+        {nextTab ? (
+          <div className="mt-10 hidden justify-end sm:flex">
+            <button
+              type="button"
+              onClick={() => void continueTo(nextTab.id)}
+              disabled={saving}
+              className="rounded-full bg-terre px-6 py-3.5 text-sm font-medium text-white transition-colors hover:bg-terre/90 disabled:opacity-60"
+            >
+              Continuer : {nextTab.label} →
+            </button>
+          </div>
+        ) : null}
+
+        {/* Sur téléphone : enregistrer et passer à l'étape suivante, sous le pouce. */}
+        {isOwner || nextTab ? (
+          <div className="above-mobile-nav fixed inset-x-3 z-40 flex gap-2 rounded-full border border-border bg-card/95 p-1.5 shadow-lg backdrop-blur sm:hidden">
+            {isOwner ? (
+              <button
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={saving}
+                className="flex-1 rounded-full border border-input bg-background px-4 py-3 text-sm font-medium text-foreground disabled:opacity-60"
+              >
+                {saving ? "…" : orderDirty || layoutDirty ? "Enregistrer •" : "Enregistrer"}
+              </button>
+            ) : null}
+            {nextTab ? (
+              <button
+                type="button"
+                onClick={() => void continueTo(nextTab.id)}
+                disabled={saving}
+                className="flex-[1.4] truncate rounded-full bg-terre px-4 py-3 text-sm font-medium text-white disabled:opacity-60"
+              >
+                {nextTab.label} →
+              </button>
+            ) : null}
           </div>
         ) : null}
 

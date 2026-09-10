@@ -1,8 +1,44 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AdminAlbumRow, Album, AlbumPreview, PhotoWithSignedUrl } from "./albums";
 import { isAlbumLayout } from "./book-layout";
+import { thumbPath } from "./photo-paths";
+
+/**
+ * Signe les originaux et leurs miniatures en deux requêtes, quel que soit le
+ * nombre de photos — un livre peut en compter cent, les signer une par une
+ * multiplierait les allers-retours d'autant.
+ *
+ * Une miniature absente (photo antérieure à leur création) revient en erreur
+ * dans le lot sans le faire échouer : `thumbUrl` vaut alors `null`.
+ */
+async function signPhotos<T extends { storage_path: string }>(
+  storage: SupabaseClient["storage"],
+  photos: T[],
+  expiresIn: number,
+): Promise<(T & { signedUrl: string; thumbUrl: string | null })[]> {
+  if (photos.length === 0) return [];
+
+  const bucket = storage.from("photos");
+  const originals = photos.map((photo) => photo.storage_path);
+  const [full, small] = await Promise.all([
+    bucket.createSignedUrls(originals, expiresIn),
+    bucket.createSignedUrls(originals.map(thumbPath), expiresIn),
+  ]);
+
+  const byPath = new Map<string, string>();
+  for (const entry of [...(full.data ?? []), ...(small.data ?? [])]) {
+    if (entry.path && entry.signedUrl && !entry.error) byPath.set(entry.path, entry.signedUrl);
+  }
+
+  return photos.map((photo) => ({
+    ...photo,
+    signedUrl: byPath.get(photo.storage_path) ?? "",
+    thumbUrl: byPath.get(thumbPath(photo.storage_path)) ?? null,
+  }));
+}
 
 /**
  * `albums.layout` est du JSON libre côté base. On le valide au passage plutôt
@@ -52,6 +88,11 @@ export const createAlbum = createServerFn({ method: "POST" })
       .object({
         title: z.string().min(1).max(120),
         description: z.string().max(500).optional(),
+        // Coffret et thème, choisis avant les photos. Absents, la base pose
+        // ses valeurs par défaut.
+        theme: z.string().min(1).max(40).optional(),
+        pageFormat: z.string().min(1).max(40).optional(),
+        coverTemplate: z.string().min(1).max(40).optional(),
       })
       .parse(data),
   )
@@ -62,6 +103,9 @@ export const createAlbum = createServerFn({ method: "POST" })
         user_id: context.userId,
         title: data.title,
         description: data.description ?? null,
+        ...(data.theme ? { theme: data.theme } : {}),
+        ...(data.pageFormat ? { page_format: data.pageFormat } : {}),
+        ...(data.coverTemplate ? { cover_template: data.coverTemplate } : {}),
       })
       .select()
       .single();
@@ -83,21 +127,7 @@ export const getPhotos = createServerFn({ method: "GET" })
       .order("created_at", { ascending: true });
 
     if (error) throw error;
-
-    const withUrls = await Promise.all(
-      (photos ?? []).map(async (photo) => {
-        const { data: signed } = await context.supabase.storage
-          .from("photos")
-          .createSignedUrl(photo.storage_path, 60 * 60 * 24);
-
-        return {
-          ...photo,
-          signedUrl: signed?.signedUrl ?? "",
-        };
-      }),
-    );
-
-    return withUrls;
+    return signPhotos(context.supabase.storage, photos ?? [], 60 * 60 * 24);
   });
 
 export const createPhoto = createServerFn({ method: "POST" })
@@ -143,11 +173,8 @@ export const createPhoto = createServerFn({ method: "POST" })
 
     if (error) throw error;
 
-    const { data: signed } = await context.supabase.storage
-      .from("photos")
-      .createSignedUrl(photo.storage_path, 60 * 60 * 24);
-
-    return { ...photo, signedUrl: signed?.signedUrl ?? "" };
+    const [signed] = await signPhotos(context.supabase.storage, [photo], 60 * 60 * 24);
+    return signed ?? { ...photo, signedUrl: "", thumbUrl: null };
   });
 
 export const deletePhoto = createServerFn({ method: "POST" })
@@ -171,7 +198,7 @@ export const deletePhoto = createServerFn({ method: "POST" })
 
     const { error: storageError } = await context.supabase.storage
       .from("photos")
-      .remove([data.storagePath]);
+      .remove([data.storagePath, thumbPath(data.storagePath)]);
 
     if (storageError) throw storageError;
 
@@ -195,7 +222,7 @@ export const deleteAlbum = createServerFn({ method: "POST" })
     if (photos && photos.length > 0) {
       const { error: storageError } = await context.supabase.storage
         .from("photos")
-        .remove(photos.map((p) => p.storage_path));
+        .remove(photos.flatMap((p) => [p.storage_path, thumbPath(p.storage_path)]));
       if (storageError) throw storageError;
     }
 
@@ -245,27 +272,21 @@ export const getAlbumsWithPreview = createServerFn({ method: "GET" })
       if (!covers.has(photo.album_id)) covers.set(photo.album_id, photo.storage_path);
     }
 
-    const coverPaths = [...covers.values()];
-    const signedByPath = new Map<string, string>();
+    // La miniature suffit à une vignette de bibliothèque ; l'original sert de repli.
+    const signedCovers = await signPhotos(
+      context.supabase.storage,
+      [...covers.entries()].map(([albumId, storage_path]) => ({ albumId, storage_path })),
+      60 * 60 * 24,
+    );
+    const coverByAlbum = new Map(
+      signedCovers.map((cover) => [cover.albumId, cover.thumbUrl ?? cover.signedUrl]),
+    );
 
-    if (coverPaths.length > 0) {
-      const { data: signed } = await context.supabase.storage
-        .from("photos")
-        .createSignedUrls(coverPaths, 60 * 60 * 24);
-
-      for (const entry of signed ?? []) {
-        if (entry.path && entry.signedUrl) signedByPath.set(entry.path, entry.signedUrl);
-      }
-    }
-
-    return albums.map((album) => {
-      const coverPath = covers.get(album.id);
-      return {
-        ...toAlbum(album),
-        photo_count: counts.get(album.id) ?? 0,
-        cover_url: coverPath ? (signedByPath.get(coverPath) ?? null) : null,
-      };
-    });
+    return albums.map((album) => ({
+      ...toAlbum(album),
+      photo_count: counts.get(album.id) ?? 0,
+      cover_url: coverByAlbum.get(album.id) || null,
+    }));
   });
 
 /* ------------------------------------------------------- livre imprimable */
@@ -357,22 +378,7 @@ export const getPhotosForExport = createServerFn({ method: "GET" })
     if (error) throw error;
     if (!photos || photos.length === 0) return [];
 
-    // Une seule requête de signature : un livre peut compter cent photos, et
-    // les signer une par une multiplierait les allers-retours d'autant.
-    const { data: signed } = await context.supabase.storage.from("photos").createSignedUrls(
-      photos.map((photo) => photo.storage_path),
-      60 * 60 * 6,
-    );
-
-    const byPath = new Map<string, string>();
-    for (const entry of signed ?? []) {
-      if (entry.path && entry.signedUrl) byPath.set(entry.path, entry.signedUrl);
-    }
-
-    return photos.map((photo) => ({
-      ...photo,
-      signedUrl: byPath.get(photo.storage_path) ?? "",
-    }));
+    return signPhotos(context.supabase.storage, photos, 60 * 60 * 6);
   });
 
 /** Tous les albums, tous comptes confondus. Réservé à l'administrateur. */

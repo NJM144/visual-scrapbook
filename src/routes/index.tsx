@@ -1,6 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/use-auth";
-import { ACACIA, SERENGETI, SHOWCASE } from "@/lib/gallery";
+import { BAND, HERO, SHOWCASE, smallSrc } from "@/lib/gallery";
+
+// Les tailles annoncées sont volontairement basses sur téléphone : un écran à
+// densité 3 réclamerait sinon l'image de 1920 px pour une photo assombrie
+// derrière du texte. La version de 960 px y est indiscernable.
+const MOBILE_FIRST_SIZES = "(max-width: 640px) 50vw, 100vw";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -9,15 +14,15 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Importez les photos de votre téléphone : elles se rangent toutes seules en albums, voyage par voyage.",
+          "Mariages, baptêmes, anniversaires, réunions de famille : importez les photos de votre téléphone, elles se rangent toutes seules, un album par événement.",
       },
       { property: "og:title", content: "Anthologie — Vos albums photos" },
       {
         property: "og:description",
         content:
-          "Importez les photos de votre téléphone : elles se rangent toutes seules en albums, voyage par voyage.",
+          "Mariages, baptêmes, anniversaires, réunions de famille : importez les photos de votre téléphone, elles se rangent toutes seules, un album par événement.",
       },
-      { property: "og:image", content: ACACIA.src },
+      { property: "og:image", content: HERO.src },
     ],
   }),
   component: HomePage,
@@ -32,7 +37,7 @@ const STEPS = [
   {
     number: "02",
     title: "Elles se rangent seules",
-    body: "La date de prise de vue de chaque cliché suffit à reconstituer vos voyages et vos journées. Un album par séjour, sans rien saisir.",
+    body: "La date de prise de vue de chaque cliché suffit à retrouver vos fêtes et vos retrouvailles. Un album par événement, sans rien saisir.",
   },
   {
     number: "03",
@@ -49,12 +54,15 @@ function HomePage() {
       {/* Hero pleine largeur : c'est la photo qui accueille, pas un bloc de texte. */}
       <header className="relative isolate flex min-h-[34rem] items-end overflow-hidden lg:min-h-[42rem]">
         <img
-          src={ACACIA.src}
-          alt={ACACIA.alt}
+          src={HERO.src}
+          srcSet={smallSrc(HERO.src) + " 960w, " + HERO.src + " 1920w"}
+          sizes={MOBILE_FIRST_SIZES}
+          alt={HERO.alt}
           width={1920}
-          height={1440}
+          height={1187}
           fetchPriority="high"
           className="absolute inset-0 -z-10 size-full object-cover"
+          style={{ objectPosition: HERO.position }}
         />
         <div
           aria-hidden
@@ -63,14 +71,14 @@ function HomePage() {
 
         <div className="mx-auto w-full max-w-6xl px-6 pb-16 pt-32 lg:pb-24">
           <p className="mb-5 text-xs font-semibold uppercase tracking-[0.22em] text-white/70">
-            {ACACIA.place}
+            {HERO.event} · {HERO.place}
           </p>
           <h1 className="max-w-[18ch] text-balance font-serif text-5xl leading-[1.03] text-white md:text-6xl lg:text-7xl">
             Vos souvenirs se rangent tout seuls.
           </h1>
           <p className="mt-6 max-w-[52ch] text-pretty text-lg leading-relaxed text-white/85">
-            Importez les photos de votre téléphone. Anthologie lit leur date de prise de vue et
-            reconstitue vos voyages, un album à la fois.
+            Mariages, baptêmes, anniversaires, réunions de famille : importez les photos de votre
+            téléphone, Anthologie lit leur date de prise de vue et en fait un album par événement.
           </p>
           <div className="mt-10 flex flex-wrap gap-3">
             <Link
@@ -114,18 +122,20 @@ function HomePage() {
       {/* Bande panoramique */}
       <section className="relative isolate overflow-hidden">
         <img
-          src={SERENGETI.src}
-          alt={SERENGETI.alt}
-          width={1920}
-          height={600}
+          src={BAND.src}
+          srcSet={smallSrc(BAND.src) + " 960w, " + BAND.src + " 1280w"}
+          sizes={MOBILE_FIRST_SIZES}
+          alt={BAND.alt}
+          width={1280}
+          height={960}
           loading="lazy"
           className="absolute inset-0 -z-10 size-full object-cover"
         />
         <div aria-hidden className="absolute inset-0 -z-10 bg-ink/55" />
         <div className="mx-auto max-w-3xl px-6 py-24 text-center lg:py-32">
           <p className="text-balance font-serif text-3xl leading-snug text-white md:text-4xl">
-            Une photo prise le mardi et une autre le samedi ne racontent pas la même histoire.
-            Anthologie s’en souvient pour vous.
+            Le baptême du samedi et le repas de famille du dimanche ne racontent pas la même
+            histoire. Anthologie s’en souvient pour vous.
           </p>
         </div>
       </section>
@@ -154,17 +164,20 @@ function HomePage() {
                 <div className="overflow-hidden rounded-2xl bg-background ring-1 ring-black/5">
                   <img
                     src={image.src}
+                    srcSet={smallSrc(image.src) + " 960w, " + image.src + " 1280w"}
+                    sizes="(max-width: 768px) 60vw, 33vw"
                     alt={image.alt}
                     width={1280}
                     height={853}
                     loading="lazy"
                     className="aspect-[4/5] w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                    style={{ objectPosition: image.position }}
                   />
                 </div>
                 <figcaption className="mt-4">
-                  <span className="block text-base font-medium text-foreground">{image.place}</span>
+                  <span className="block text-base font-medium text-foreground">{image.event}</span>
                   <span className="block text-sm text-muted-foreground">
-                    Photographie de {image.author}
+                    {image.place} · photographie de {image.author}
                   </span>
                 </figcaption>
               </figure>

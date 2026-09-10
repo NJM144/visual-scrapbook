@@ -56,6 +56,8 @@ export interface Photo {
 
 export interface PhotoWithSignedUrl extends Photo {
   signedUrl: string;
+  /** Miniature de 640 px ; `null` pour une photo envoyée avant leur création. */
+  thumbUrl: string | null;
 }
 
 /** Album enrichi pour la bibliothèque : nombre de photos et vignette de couverture. */

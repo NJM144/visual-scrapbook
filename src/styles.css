@@ -164,4 +164,50 @@
   h6 {
     font-family: var(--font-serif);
   }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* Supprime l'attente du double-tap sur ce qui se touche. */
+  button,
+  a,
+  label,
+  [role="button"] {
+    touch-action: manipulation;
+  }
+}
+
+/*
+ * Mobile.
+ *
+ * Hors couche, volontairement : ces règles doivent l'emporter sur les
+ * utilitaires (text-sm des champs, notamment), que Tailwind range dans une
+ * couche de priorité supérieure à `base`.
+ */
+:root {
+  /* Hauteur de la barre de navigation du bas, sur téléphone. */
+  --mobile-nav-height: 4rem;
+}
+
+/* iOS zoome sur tout champ en dessous de 16 px au moment où on le touche, et
+   ne dézoome pas ensuite : la page reste de travers. */
+@media (max-width: 639px) {
+  input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Barres flottantes : au-dessus de la navigation du bas et de la zone du geste
+   d'accueil des téléphones sans bouton. */
+.above-mobile-nav {
+  bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + 0.75rem);
+}
+@media (min-width: 640px) {
+  .above-mobile-nav {
+    bottom: 1.5rem;
+  }
 }

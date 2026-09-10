@@ -1,8 +1,10 @@
 /**
- * Photographies de paysages africains utilisées comme décor du site.
+ * Photographies d'événements familiaux utilisées comme décor du site.
  *
- * Toutes proviennent de Wikimedia Commons et sont librement réutilisables.
- * Les licences CC BY-SA imposent de créditer l'auteur : les mentions ci-dessous
+ * Anthologie sert à garder les mariages, baptêmes, anniversaires et réunions
+ * de famille : le décor doit montrer des gens qui se retrouvent, pas des
+ * paysages. Toutes viennent de Wikimedia Commons (concours Wiki Loves Africa)
+ * sous CC BY-SA 4.0, qui impose de créditer l'auteur : les mentions ci-dessous
  * sont affichées en pied de page, ne les retirez pas sans remplacer les images.
  */
 
@@ -10,63 +12,93 @@ export interface GalleryImage {
   src: string;
   /** Texte alternatif : décrit la scène, pas le rôle décoratif. */
   alt: string;
+  /** L'occasion, telle qu'on nommerait l'album. */
+  event: string;
   place: string;
   author: string;
   license: string;
   /** Page d'origine sur Wikimedia Commons. */
   source: string;
+  /** Point de cadrage (object-position) quand l'image est rognée. */
+  position?: string;
 }
 
-export const ACACIA: GalleryImage = {
-  src: "/images/savane-acacia.jpg",
-  alt: "Acacia se détachant sur un lever de soleil orange dans la savane du Serengeti",
-  place: "Serengeti, Tanzanie",
-  author: "Daniel Zaas",
-  license: "Domaine public",
-  source:
-    "https://commons.wikimedia.org/wiki/File:Acacia_tree_on_a_sunrise_safari_at_the_Serengeti_National_Park,_Tanzania.jpg",
+export const DANSE_MARIAGE: GalleryImage = {
+  src: "/images/mariage-danse.jpg",
+  alt: "Danseuses en tenue traditionnelle, bras levés et souriantes, pendant un mariage",
+  event: "Mariage",
+  place: "Rwanda",
+  author: "Davyimage",
+  license: "CC BY-SA 4.0",
+  source: "https://commons.wikimedia.org/wiki/File:Rwanda_tradional_dance_in_wedding.jpg",
+  position: "50% 30%",
 };
 
-export const SERENGETI: GalleryImage = {
-  src: "/images/serengeti-aube.jpg",
-  alt: "Plaine dorée du Serengeti à l’aube, colline bleutée au loin",
-  place: "Serengeti, Tanzanie",
-  author: "Giles Laurent",
+export const REUNION_FAMILLE: GalleryImage = {
+  src: "/images/reunion-famille.jpg",
+  alt: "Une grande famille assise en cercle sur des chaises colorées devant une maison en briques",
+  event: "Réunion de famille",
+  place: "Pays bamiléké, Cameroun",
+  author: "Mndetatsin",
   license: "CC BY-SA 4.0",
   source:
-    "https://commons.wikimedia.org/wiki/File:004_Sunrise_at_Serengeti_National_Park_Photo_by_Giles_Laurent.jpg",
+    "https://commons.wikimedia.org/wiki/File:Reunion_familliale_dans_une_concession_bamil%C3%A9k%C3%A9_au_Cameroun.jpg",
 };
 
-export const DENT_DE_MAN: GalleryImage = {
-  src: "/images/dent-de-man.jpg",
-  alt: "La Dent de Man, piton rocheux émergeant d’une forêt verte sous un ciel nuageux",
-  place: "Man, Côte d’Ivoire",
-  author: "Milequem Diarassouba",
+export const MARIAGE: GalleryImage = {
+  src: "/images/mariage.jpg",
+  alt: "La mariée en corail et le marié en blanc échangent une coupe, entourés de la famille",
+  event: "Mariage traditionnel",
+  place: "Esan, Nigeria",
+  author: "Pictureperfect photography",
   license: "CC BY-SA 4.0",
-  source: "https://commons.wikimedia.org/wiki/File:The_Dent_de_Man_mountain.jpg",
+  source: "https://commons.wikimedia.org/wiki/File:Esan_traditional_wedding_001.jpg",
 };
 
-export const BAOBABS: GalleryImage = {
-  src: "/images/allee-des-baobabs.jpg",
-  alt: "Allée de baobabs géants sur une piste de terre au coucher du soleil",
-  place: "Morondava, Madagascar",
-  author: "Rod Waddington",
-  license: "CC BY-SA 2.0",
-  source:
-    "https://commons.wikimedia.org/wiki/File:Sunset,_Allee_des_Baobabs,_Madagascar_(27610142306).jpg",
-};
-
-export const DUNES: GalleryImage = {
-  src: "/images/dunes-erg-chebbi.jpg",
-  alt: "Dunes ondulées de l’Erg Chebbi éclairées par un soleil rasant",
-  place: "Erg Chebbi, Maroc",
-  author: "Snowmanstudios",
+export const BAPTEME: GalleryImage = {
+  src: "/images/bapteme.jpg",
+  alt: "Quatre jeunes baptisés vêtus de blanc posent ensemble le jour de leur baptême",
+  event: "Baptême",
+  place: "Cameroun",
+  author: "NZALLI MAMBOU Freddy",
   license: "CC BY-SA 4.0",
-  source: "https://commons.wikimedia.org/wiki/File:Erg_Chebbi_sunset.jpg",
+  source: "https://commons.wikimedia.org/wiki/File:C%C3%A9l%C3%A9bration_du_bapt%C3%AAme.jpg",
+  position: "50% 35%",
 };
 
-/** Les trois paysages présentés en exemple d'albums sur la page d'accueil. */
-export const SHOWCASE: GalleryImage[] = [DENT_DE_MAN, BAOBABS, DUNES];
+export const ANNIVERSAIRE: GalleryImage = {
+  src: "/images/anniversaire.jpg",
+  alt: "Un gâteau surmonté d’un cierge magique apporté à un couple qui sourit",
+  event: "Anniversaire",
+  place: "Rwanda",
+  author: "Kian bless",
+  license: "CC BY-SA 4.0",
+  source: "https://commons.wikimedia.org/wiki/File:Birthday_show_04.jpg",
+  position: "62% 50%",
+};
+
+/**
+ * Version de 960 px de large, pour les téléphones : le tiers du poids, et
+ * aucune différence visible sur un écran de cette taille.
+ */
+export function smallSrc(src: string): string {
+  return src.replace(/\.jpg$/, "-960.jpg");
+}
+
+/** Photo d'accueil, en pleine largeur. */
+export const HERO = DANSE_MARIAGE;
+
+/** Bande panoramique entre deux sections. */
+export const BAND = REUNION_FAMILLE;
+
+/** Les trois événements présentés en exemple d'albums sur la page d'accueil. */
+export const SHOWCASE: GalleryImage[] = [MARIAGE, BAPTEME, ANNIVERSAIRE];
 
 /** Ensemble complet, pour la mention légale du pied de page. */
-export const CREDITS: GalleryImage[] = [ACACIA, SERENGETI, DENT_DE_MAN, BAOBABS, DUNES];
+export const CREDITS: GalleryImage[] = [
+  DANSE_MARIAGE,
+  REUNION_FAMILLE,
+  MARIAGE,
+  BAPTEME,
+  ANNIVERSAIRE,
+];

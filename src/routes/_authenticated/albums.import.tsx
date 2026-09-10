@@ -16,7 +16,12 @@ import {
   type GroupingMode,
   type PhotoGroup,
 } from "@/lib/photo-grouping";
-import { createThumbnail, formatBytes, processForUpload } from "@/lib/image-processing";
+import { createThumbnail, formatBytes } from "@/lib/image-processing";
+import { uploadPhotoFile } from "@/lib/photo-upload";
+import { BookStylePicker } from "@/components/BookStylePicker";
+import { DEFAULT_THEME_ID, findTheme } from "@/lib/book-themes";
+import { DEFAULT_FORMAT_ID, findFormat } from "@/lib/print-formats";
+import { DEFAULT_COVER_TEMPLATE, findCoverTemplate } from "@/lib/cover-templates";
 
 export const Route = createFileRoute("/_authenticated/albums/import")({
   head: () => ({
@@ -25,17 +30,17 @@ export const Route = createFileRoute("/_authenticated/albums/import")({
       {
         name: "description",
         content:
-          "Importez vos photos et laissez-les se ranger toutes seules en albums, par voyage ou par date.",
+          "Importez vos photos et laissez-les se ranger toutes seules en albums, par événement ou par date.",
       },
     ],
   }),
   component: ImportPage,
 });
 
-type Step = "select" | "analyzing" | "review" | "importing" | "done";
+type Step = "style" | "select" | "analyzing" | "review" | "importing" | "done";
 
 const MODES: { value: GroupingMode; label: string; hint: string }[] = [
-  { value: "trip", label: "Par voyage", hint: "Coupe l’album après plusieurs jours sans photo" },
+  { value: "trip", label: "Par événement", hint: "Coupe l’album après plusieurs jours sans photo" },
   { value: "day", label: "Par journée", hint: "Un album par jour de prise de vue" },
   { value: "month", label: "Par mois", hint: "Un album par mois" },
   { value: "single", label: "Un seul album", hint: "Tout regrouper d’un bloc" },
@@ -53,7 +58,12 @@ function ImportPage() {
   const addPhoto = useServerFn(createPhoto);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const [step, setStep] = useState<Step>("select");
+  // Le coffret et le thème viennent en premier : ils conditionnent la mise en
+  // page de chaque album créé.
+  const [step, setStep] = useState<Step>("style");
+  const [formatId, setFormatId] = useState(DEFAULT_FORMAT_ID);
+  const [coverTemplateId, setCoverTemplateId] = useState(DEFAULT_COVER_TEMPLATE);
+  const [themeId, setThemeId] = useState(DEFAULT_THEME_ID);
   const [photos, setPhotos] = useState<DatedPhoto[]>([]);
   const [analyzed, setAnalyzed] = useState(0);
   const [totalToAnalyze, setTotalToAnalyze] = useState(0);
@@ -165,14 +175,7 @@ function ImportPage() {
         if (!photo) continue;
 
         try {
-          const processed = await processForUpload(photo.file);
-          const path =
-            userId + "/" + albumId + "/" + crypto.randomUUID() + "." + processed.extension;
-
-          const { error: uploadError } = await supabase.storage
-            .from("photos")
-            .upload(path, processed.blob, { contentType: processed.blob.type || "image/jpeg" });
-          if (uploadError) throw uploadError;
+          const { path } = await uploadPhotoFile(photo.file, userId, albumId);
 
           await addPhoto({
             data: {
@@ -225,6 +228,9 @@ function ImportPage() {
             title: title.slice(0, 120),
             description:
               count + " photo" + plural + " importée" + plural + " depuis mon téléphone.",
+            theme: themeId,
+            pageFormat: formatId,
+            coverTemplate: coverTemplateId,
           },
         });
 
@@ -264,8 +270,8 @@ function ImportPage() {
           </h1>
           <p className="mt-4 max-w-[60ch] leading-relaxed text-foreground/70">
             Choisissez des photos dans la galerie de votre téléphone. Leur date de prise de vue
-            suffit à reconstituer vos voyages et vos journées — un album pour chacun, sans rien
-            saisir.
+            suffit à retrouver vos fêtes et vos réunions de famille — un album pour chacun, sans
+            rien saisir.
           </p>
         </header>
 
@@ -277,6 +283,42 @@ function ImportPage() {
           className="hidden"
           onChange={(event) => handleFiles(event.target.files)}
         />
+
+        {step === "style" ? (
+          <div>
+            <p className="mb-8 max-w-[62ch] text-sm leading-relaxed text-muted-foreground">
+              Commencez par le coffret et le thème : chaque album créé les recevra. Ils décident de
+              la mise en page, c’est pourquoi on les fixe avant les photos — vous pourrez encore les
+              changer album par album.
+            </p>
+            <BookStylePicker
+              formatId={formatId}
+              coverTemplateId={coverTemplateId}
+              themeId={themeId}
+              onFormatChange={setFormatId}
+              onCoverTemplateChange={setCoverTemplateId}
+              onThemeChange={setThemeId}
+              title="Mon album"
+              withPreview
+            />
+            <div className="mt-10 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  if (photos.length > 0) {
+                    setStep("review");
+                    return;
+                  }
+                  setStep("select");
+                  inputRef.current?.click();
+                }}
+                className="inline-flex w-full items-center justify-center rounded-full bg-primary px-8 py-4 text-base font-medium text-primary-foreground transition-colors hover:bg-primary/90 sm:w-auto"
+              >
+                {photos.length > 0 ? "Revenir au découpage" : "Continuer : choisir mes photos"}
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {step === "select" ? <SelectStep onPick={() => inputRef.current?.click()} /> : null}
 
@@ -321,6 +363,28 @@ function ImportPage() {
 
         {step === "review" ? (
           <div className="space-y-8">
+            <p className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-2xl border border-border bg-card px-5 py-3 text-sm text-muted-foreground">
+              <span>
+                Coffret{" "}
+                <strong className="font-medium text-foreground">
+                  {findFormat(formatId).label}
+                </strong>{" "}
+                · couverture{" "}
+                <strong className="font-medium text-foreground">
+                  {findCoverTemplate(coverTemplateId).label}
+                </strong>{" "}
+                · thème{" "}
+                <strong className="font-medium text-foreground">{findTheme(themeId).label}</strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => setStep("style")}
+                className="underline underline-offset-4 hover:text-foreground"
+              >
+                Modifier
+              </button>
+            </p>
+
             <section className="rounded-3xl border border-border bg-card p-6 md:p-8">
               <div className="flex flex-wrap items-baseline justify-between gap-4">
                 <h2 className="font-serif text-2xl text-foreground">Découpage</h2>
@@ -463,7 +527,7 @@ function ImportPage() {
               )}
             </section>
 
-            <div className="sticky bottom-4 z-10 flex flex-col items-stretch gap-3 rounded-3xl border border-border bg-card/95 px-5 py-4 text-center shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:rounded-full sm:px-6 sm:text-left">
+            <div className="above-mobile-nav sticky z-10 flex flex-col items-stretch gap-3 rounded-3xl border border-border bg-card/95 px-5 py-4 text-center shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:rounded-full sm:px-6 sm:text-left">
               <p className="text-sm text-foreground">
                 <span className="font-medium">{kept.length}</span> album
                 {kept.length > 1 ? "s" : ""} · <span className="font-medium">{keptPhotoCount}</span>{" "}
