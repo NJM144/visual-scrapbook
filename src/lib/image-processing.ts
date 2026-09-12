@@ -1,53 +1,17 @@
 /**
- * Redimensionnement et compression des photos avant envoi.
+ * Petites images calculées dans le navigateur : aperçus du tri avant import et
+ * vignette envoyée au modèle de vision.
  *
- * Un import depuis un téléphone porte facilement sur 200 clichés de 4 Mo. Les
- * envoyer bruts sur un forfait data, c'est près d'un giga-octet et un import qui
- * n'aboutit jamais. On ramène chaque image à une définition d'affichage avant
- * de la téléverser.
+ * Les photos elles-mêmes ne sont plus réduites avant l'envoi : le fichier
+ * d'impression est l'original intact (photo-inspect.ts, upload-queue.ts).
  */
 
-/**
- * Définition d'envoi, selon la connexion.
- *
- * 2048 px plafonnaient la qualité d'impression : à peine 170 dpi sur un livre
- * 30×30, soit un rendu mou. 3200 px donnent 265 dpi au même format, largement
- * acceptable. Mais c'est aussi trois fois le poids — intenable sur une 3G
- * ivoirienne ou en mode économie de données, où l'on garde 2048.
- */
-const MAX_DIMENSION_FAST = 3200;
-const MAX_DIMENSION_SLOW = 2048;
-
-interface NetworkInformation {
-  effectiveType?: string;
-  saveData?: boolean;
-}
-
-/** Plafond adapté à la connexion courante. */
-export function uploadDimension(): number {
-  const connection = (navigator as Navigator & { connection?: NetworkInformation }).connection;
-  if (!connection) return MAX_DIMENSION_FAST;
-
-  if (connection.saveData) return MAX_DIMENSION_SLOW;
-  const type = connection.effectiveType ?? "";
-  if (type === "slow-2g" || type === "2g" || type === "3g") return MAX_DIMENSION_SLOW;
-  return MAX_DIMENSION_FAST;
-}
-const JPEG_QUALITY = 0.82;
 const THUMBNAIL_DIMENSION = 320;
 const THUMBNAIL_QUALITY = 0.7;
 
-export interface ProcessedImage {
-  blob: Blob;
-  /** Extension à utiliser pour le chemin de stockage. */
-  extension: string;
-  width: number;
-  height: number;
-}
-
 /**
- * Décode le fichier en respectant l'orientation EXIF, faute de quoi les photos
- * prises en portrait arrivent couchées.
+ * Décode en respectant l'orientation EXIF, faute de quoi les photos prises en
+ * portrait arrivent couchées.
  */
 async function decode(source: Blob): Promise<ImageBitmap> {
   try {
@@ -87,42 +51,6 @@ function draw(bitmap: ImageBitmap, width: number, height: number): HTMLCanvasEle
 }
 
 /**
- * Prépare une photo pour l'envoi. En cas d'échec du décodage — format exotique,
- * mémoire insuffisante sur un vieil appareil — on renvoie le fichier d'origine
- * plutôt que de perdre la photo.
- */
-export async function processForUpload(file: File): Promise<ProcessedImage> {
-  const original: ProcessedImage = {
-    blob: file,
-    extension: file.name.split(".").pop()?.toLowerCase() || "jpg",
-    width: 0,
-    height: 0,
-  };
-
-  let bitmap: ImageBitmap;
-  try {
-    bitmap = await decode(file);
-  } catch {
-    return original;
-  }
-
-  try {
-    const { width, height } = scaledSize(bitmap.width, bitmap.height, uploadDimension());
-    const blob = await toBlob(draw(bitmap, width, height), JPEG_QUALITY);
-
-    // Une photo déjà petite ou déjà bien compressée ne gagne rien à être
-    // ré-encodée : on garde l'originale, de meilleure qualité.
-    if (!blob || blob.size >= file.size) return original;
-
-    return { blob, extension: "jpg", width, height };
-  } catch {
-    return original;
-  } finally {
-    bitmap.close();
-  }
-}
-
-/**
  * Vignette pour l'aperçu avant import. On ne peut pas afficher 300 objets URL
  * de 4 Mo : le navigateur mobile s'effondre.
  */
@@ -138,29 +66,6 @@ export async function createThumbnail(file: File): Promise<string | null> {
     const { width, height } = scaledSize(bitmap.width, bitmap.height, THUMBNAIL_DIMENSION);
     const blob = await toBlob(draw(bitmap, width, height), THUMBNAIL_QUALITY);
     return blob ? URL.createObjectURL(blob) : null;
-  } catch {
-    return null;
-  } finally {
-    bitmap.close();
-  }
-}
-
-/** Miniature stockée à côté de chaque photo : 640 px couvrent une grille de téléphone. */
-const STORAGE_THUMBNAIL_DIMENSION = 640;
-const STORAGE_THUMBNAIL_QUALITY = 0.72;
-
-/** Miniature JPEG d'une image, pour le stockage. `null` si le décodage échoue. */
-export async function createStorageThumbnail(source: Blob): Promise<Blob | null> {
-  let bitmap: ImageBitmap;
-  try {
-    bitmap = await decode(source);
-  } catch {
-    return null;
-  }
-
-  try {
-    const { width, height } = scaledSize(bitmap.width, bitmap.height, STORAGE_THUMBNAIL_DIMENSION);
-    return await toBlob(draw(bitmap, width, height), STORAGE_THUMBNAIL_QUALITY);
   } catch {
     return null;
   } finally {
@@ -192,7 +97,7 @@ export async function createAiThumbnail(
   try {
     const response = await fetch(url);
     if (!response.ok) return null;
-    bitmap = await decode(new File([await response.blob()], "photo"));
+    bitmap = await decode(await response.blob());
   } catch {
     return null;
   }

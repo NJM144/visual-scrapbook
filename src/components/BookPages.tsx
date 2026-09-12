@@ -123,7 +123,7 @@ export function BookPages({
                       // La miniature sur téléphone, l'original sur grand écran.
                       srcSet={
                         photo.thumbUrl
-                          ? photo.thumbUrl + " 640w, " + photo.signedUrl + " 2048w"
+                          ? photo.thumbUrl + " 400w, " + photo.signedUrl + " 1400w"
                           : undefined
                       }
                       sizes="(max-width: 640px) 40vw, 45vw"

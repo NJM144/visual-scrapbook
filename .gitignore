@@ -35,3 +35,7 @@ dist-ssr
 # Artefacts locaux du CLI Supabase : contiennent la chaine de connexion
 # a la base, mot de passe compris. Ne doivent jamais etre versionnes.
 supabase/.temp/
+
+# Rattrapage des métadonnées photo (scripts/backfill-photo-metadata.mjs)
+scripts/.backfill-state.json
+scripts/backfill.log

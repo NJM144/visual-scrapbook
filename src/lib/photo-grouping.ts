@@ -8,7 +8,8 @@
  * fête, une journée) que les albums du téléphone.
  */
 
-import type { DateSource } from "./exif";
+/** D'où vient la date : l'EXIF de la photo, ou la date du fichier à défaut. */
+export type DateSource = "exif" | "file";
 
 export type GroupingMode = "trip" | "day" | "month" | "single";
 

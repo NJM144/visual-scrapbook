@@ -2,42 +2,183 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AdminAlbumRow, Album, AlbumPreview, PhotoWithSignedUrl } from "./albums";
+import type { Database } from "@/integrations/supabase/types";
+import type {
+  AdminAlbumRow,
+  Album,
+  AlbumPreview,
+  GridPhoto,
+  PhotoPage,
+  PhotoWithSignedUrl,
+} from "./albums";
 import { isAlbumLayout } from "./book-layout";
 import { thumbPath } from "./photo-paths";
+import {
+  DISPLAY_TRANSFORM,
+  RENEW_BEFORE_MS,
+  THUMB_TRANSFORM,
+  VERSION_TTL_S,
+} from "./photo-versions";
+
+type Client = SupabaseClient<Database>;
+
+/** Les transformations plafonnent vers 3 000 px : repli d'impression pour un HEIC seulement. */
+const HEIC_PRINT_TRANSFORM = { width: 2500, height: 2500, resize: "contain", quality: 92 } as const;
+const PRINT_TTL_S = 6 * 60 * 60;
+
+interface VersionRow {
+  id: string;
+  storage_path: string;
+  print_path?: string | null;
+  upload_status?: string | null;
+  thumb_url?: string | null;
+  display_url?: string | null;
+  urls_expire_at?: string | null;
+}
+
+async function mapLimit<T, R>(list: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(list.length);
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, list.length) }, async () => {
+      while (cursor < list.length) {
+        const index = cursor;
+        cursor += 1;
+        out[index] = await fn(list[index] as T);
+      }
+    }),
+  );
+  return out;
+}
 
 /**
- * Signe les originaux et leurs miniatures en deux requêtes, quel que soit le
- * nombre de photos — un livre peut en compter cent, les signer une par une
- * multiplierait les allers-retours d'autant.
+ * URL de la vignette et de la version d'affichage de chaque photo.
  *
- * Une miniature absente (photo antérieure à leur création) revient en erreur
- * dans le lot sans le faire échouer : `thumbUrl` vaut alors `null`.
+ * Réutilise celles gardées en base tant qu'il leur reste plus de 7 jours, et
+ * ne signe que les autres — une signature par version, le lot de signatures
+ * de Supabase ignorant les transformations (vérifié). Le cas courant ne signe
+ * donc rien : la file d'envoi enregistre les URL dès la fin de l'envoi, et le
+ * script de rattrapage les a posées sur les photos plus anciennes. Une photo
+ * encore en cours d'envoi n'a pas de fichier : elle n'a pas encore d'URL.
  */
-async function signPhotos<T extends { storage_path: string }>(
-  storage: SupabaseClient["storage"],
-  photos: T[],
-  expiresIn: number,
-): Promise<(T & { signedUrl: string; thumbUrl: string | null })[]> {
-  if (photos.length === 0) return [];
+async function withVersionUrls<T extends VersionRow>(
+  supabase: Client,
+  rows: T[],
+  canPersist: (row: T) => boolean,
+): Promise<(T & { thumbUrl: string | null; displayUrl: string | null })[]> {
+  const now = Date.now();
+  const stale = rows.filter(
+    (row) =>
+      row.upload_status !== "uploading" &&
+      !(
+        row.thumb_url &&
+        row.display_url &&
+        row.urls_expire_at &&
+        Date.parse(row.urls_expire_at) - now > RENEW_BEFORE_MS
+      ),
+  );
 
-  const bucket = storage.from("photos");
-  const originals = photos.map((photo) => photo.storage_path);
-  const [full, small] = await Promise.all([
-    bucket.createSignedUrls(originals, expiresIn),
-    bucket.createSignedUrls(originals.map(thumbPath), expiresIn),
-  ]);
+  const bucket = supabase.storage.from("photos");
+  const fresh = new Map<string, { thumb: string | null; display: string | null }>();
+  await mapLimit(stale, 12, async (row) => {
+    const path = row.print_path ?? row.storage_path;
+    const [thumb, display] = await Promise.all([
+      bucket.createSignedUrl(path, VERSION_TTL_S, { transform: THUMB_TRANSFORM }),
+      bucket.createSignedUrl(path, VERSION_TTL_S, { transform: DISPLAY_TRANSFORM }),
+    ]);
+    fresh.set(row.id, {
+      thumb: thumb.data?.signedUrl ?? null,
+      display: display.data?.signedUrl ?? null,
+    });
+  });
 
-  const byPath = new Map<string, string>();
-  for (const entry of [...(full.data ?? []), ...(small.data ?? [])]) {
-    if (entry.path && entry.signedUrl && !entry.error) byPath.set(entry.path, entry.signedUrl);
+  const expires = new Date(now + VERSION_TTL_S * 1000).toISOString();
+  await mapLimit(
+    stale.filter((row) => canPersist(row)),
+    12,
+    async (row) => {
+      const urls = fresh.get(row.id);
+      if (!urls?.thumb || !urls.display) return;
+      // Un échec ici ne gêne pas l'affichage : on resignera à la prochaine visite.
+      await supabase
+        .from("photos")
+        .update({ thumb_url: urls.thumb, display_url: urls.display, urls_expire_at: expires })
+        .eq("id", row.id);
+    },
+  );
+
+  return rows.map((row) => {
+    const urls = fresh.get(row.id);
+    return {
+      ...row,
+      thumbUrl: urls ? urls.thumb : (row.thumb_url ?? null),
+      displayUrl: urls ? urls.display : (row.display_url ?? null),
+    };
+  });
+}
+
+async function isAdminUser(supabase: Client, userId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId)
+    .eq("role", "admin")
+    .maybeSingle();
+  return Boolean(data);
+}
+
+const isHeicPhoto = (photo: {
+  storage_path: string;
+  print_path?: string | null;
+  mime_type?: string | null;
+}) =>
+  /hei[cf]/i.test(photo.mime_type ?? "") ||
+  /\.(heic|heif)$/i.test(photo.print_path ?? photo.storage_path);
+
+/**
+ * Fichiers d'impression signés pour l'export. Les HEIC, que le navigateur de
+ * l'administrateur ne sait pas décoder, passent par une transformation au
+ * plafond de Supabase : l'indicateur de définition de la fiche technique le
+ * signalera.
+ */
+async function signPrintFiles(
+  supabase: Client,
+  photos: {
+    id: string;
+    storage_path: string;
+    print_path?: string | null;
+    mime_type?: string | null;
+  }[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const bucket = supabase.storage.from("photos");
+  const plain = photos.filter((photo) => !isHeicPhoto(photo));
+  const heic = photos.filter(isHeicPhoto);
+
+  if (plain.length > 0) {
+    const pathOf = (photo: (typeof plain)[number]) => photo.print_path ?? photo.storage_path;
+    const { data } = await bucket.createSignedUrls(plain.map(pathOf), PRINT_TTL_S);
+    const byPath = new Map<string, string>();
+    for (const entry of data ?? []) {
+      if (entry.path && entry.signedUrl && !entry.error) byPath.set(entry.path, entry.signedUrl);
+    }
+    for (const photo of plain) {
+      const url = byPath.get(pathOf(photo));
+      if (url) out.set(photo.id, url);
+    }
   }
 
-  return photos.map((photo) => ({
-    ...photo,
-    signedUrl: byPath.get(photo.storage_path) ?? "",
-    thumbUrl: byPath.get(thumbPath(photo.storage_path)) ?? null,
-  }));
+  await mapLimit(heic, 8, async (photo) => {
+    const { data } = await bucket.createSignedUrl(
+      photo.print_path ?? photo.storage_path,
+      PRINT_TTL_S,
+      {
+        transform: HEIC_PRINT_TRANSFORM,
+      },
+    );
+    if (data?.signedUrl) out.set(photo.id, data.signedUrl);
+  });
+  return out;
 }
 
 /**
@@ -114,67 +255,62 @@ export const createAlbum = createServerFn({ method: "POST" })
     return toAlbum(album);
   });
 
-export const getPhotos = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((data) => z.object({ albumId: z.string().uuid() }).parse(data))
-  .handler(async ({ context, data }): Promise<PhotoWithSignedUrl[]> => {
-    const { data: photos, error } = await context.supabase
-      .from("photos")
-      .select("*")
-      .eq("album_id", data.albumId)
-      .eq("user_id", context.userId)
-      .order("order_index", { ascending: true })
-      .order("created_at", { ascending: true });
+/** Colonnes utiles à la grille ; les autres restent en base. */
+const GRID_COLUMNS =
+  "id, storage_path, print_path, caption, order_index, created_at, taken_at, width, height, aspect_ratio, dominant_color, upload_status, thumb_url, display_url, urls_expire_at";
 
-    if (error) throw error;
-    return signPhotos(context.supabase.storage, photos ?? [], 60 * 60 * 24);
-  });
-
-export const createPhoto = createServerFn({ method: "POST" })
+/**
+ * Une page de la grille d'un album. Les photos s'enregistrent désormais
+ * depuis le navigateur (file d'envoi) : il n'y a plus de fonction serveur par
+ * photo, qui coûtait 918 ms chacune depuis Washington.
+ */
+export const getPhotosPage = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data) =>
     z
       .object({
         albumId: z.string().uuid(),
-        storagePath: z.string().min(1),
-        caption: z.string().max(300).optional(),
-        orderIndex: z.number().int().min(0).max(100000).optional(),
-        takenAt: z.string().datetime().optional(),
-        latitude: z.number().min(-90).max(90).optional(),
-        longitude: z.number().min(-180).max(180).optional(),
+        offset: z.number().int().min(0),
+        limit: z.number().int().min(1).max(120),
       })
       .parse(data),
   )
-  .handler(async ({ context, data }): Promise<PhotoWithSignedUrl> => {
-    const { data: album, error: albumError } = await context.supabase
-      .from("albums")
-      .select("id")
-      .eq("id", data.albumId)
-      .eq("user_id", context.userId)
-      .single();
-
-    if (albumError || !album) throw new Error("Album introuvable");
-
-    const { data: photo, error } = await context.supabase
+  .handler(async ({ context, data }): Promise<PhotoPage> => {
+    const {
+      data: rows,
+      error,
+      count,
+    } = await context.supabase
       .from("photos")
-      .insert({
-        album_id: data.albumId,
-        user_id: context.userId,
-        storage_path: data.storagePath,
-        url: "",
-        caption: data.caption ?? null,
-        order_index: data.orderIndex ?? 0,
-        taken_at: data.takenAt ?? null,
-        latitude: data.latitude ?? null,
-        longitude: data.longitude ?? null,
-      })
-      .select()
-      .single();
+      .select(GRID_COLUMNS, data.offset === 0 ? { count: "exact" } : {})
+      .eq("album_id", data.albumId)
+      .eq("user_id", context.userId)
+      .order("order_index", { ascending: true })
+      .order("created_at", { ascending: true })
+      .range(data.offset, data.offset + data.limit - 1);
 
     if (error) throw error;
+    const list = rows ?? [];
+    const photos = await withVersionUrls(context.supabase, list, () => true);
 
-    const [signed] = await signPhotos(context.supabase.storage, [photo], 60 * 60 * 24);
-    return signed ?? { ...photo, signedUrl: "", thumbUrl: null };
+    return {
+      photos: photos.map((photo): GridPhoto => ({
+        id: photo.id,
+        storage_path: photo.storage_path,
+        caption: photo.caption,
+        order_index: photo.order_index,
+        taken_at: photo.taken_at,
+        width: photo.width,
+        height: photo.height,
+        aspect_ratio: photo.aspect_ratio,
+        dominant_color: photo.dominant_color,
+        upload_status: photo.upload_status,
+        thumbUrl: photo.thumbUrl,
+        displayUrl: photo.displayUrl,
+      })),
+      total: count ?? null,
+      nextOffset: list.length === data.limit ? data.offset + data.limit : null,
+    };
   });
 
 export const deletePhoto = createServerFn({ method: "POST" })
@@ -256,36 +392,44 @@ export const getAlbumsWithPreview = createServerFn({ method: "GET" })
     if (error) throw error;
     if (!albums || albums.length === 0) return [];
 
-    const { data: photos, error: photosError } = await context.supabase
-      .from("photos")
-      .select("album_id, storage_path, order_index, created_at")
-      .eq("user_id", context.userId)
-      .order("order_index", { ascending: true })
-      .order("created_at", { ascending: true });
+    // Compté en base : lire toutes les photos pour les compter butait sur le
+    // plafond de 1 000 lignes de PostgREST.
+    const { data: stats, error: statsError } = await context.supabase.rpc("album_photo_stats");
+    if (statsError) throw statsError;
+    const statsByAlbum = new Map((stats ?? []).map((row) => [row.album_id, row]));
 
-    if (photosError) throw photosError;
-
-    const counts = new Map<string, number>();
-    const covers = new Map<string, string>();
-    for (const photo of photos ?? []) {
-      counts.set(photo.album_id, (counts.get(photo.album_id) ?? 0) + 1);
-      if (!covers.has(photo.album_id)) covers.set(photo.album_id, photo.storage_path);
+    const coverIds = (stats ?? [])
+      .map((row) => row.cover_photo_id)
+      .filter((id): id is string => Boolean(id));
+    let covers: {
+      id: string;
+      album_id: string;
+      storage_path: string;
+      print_path: string | null;
+      upload_status: string;
+      thumb_url: string | null;
+      display_url: string | null;
+      urls_expire_at: string | null;
+    }[] = [];
+    if (coverIds.length > 0) {
+      const { data, error: coversError } = await context.supabase
+        .from("photos")
+        .select(
+          "id, album_id, storage_path, print_path, upload_status, thumb_url, display_url, urls_expire_at",
+        )
+        .in("id", coverIds);
+      if (coversError) throw coversError;
+      covers = data ?? [];
     }
 
-    // La miniature suffit à une vignette de bibliothèque ; l'original sert de repli.
-    const signedCovers = await signPhotos(
-      context.supabase.storage,
-      [...covers.entries()].map(([albumId, storage_path]) => ({ albumId, storage_path })),
-      60 * 60 * 24,
-    );
-    const coverByAlbum = new Map(
-      signedCovers.map((cover) => [cover.albumId, cover.thumbUrl ?? cover.signedUrl]),
-    );
+    // La vignette suffit à une couverture de bibliothèque.
+    const signed = await withVersionUrls(context.supabase, covers, () => true);
+    const coverByAlbum = new Map(signed.map((cover) => [cover.album_id, cover.thumbUrl]));
 
     return albums.map((album) => ({
       ...toAlbum(album),
-      photo_count: counts.get(album.id) ?? 0,
-      cover_url: coverByAlbum.get(album.id) || null,
+      photo_count: Number(statsByAlbum.get(album.id)?.photo_count ?? 0),
+      cover_url: coverByAlbum.get(album.id) ?? null,
     }));
   });
 
@@ -363,22 +507,45 @@ export const getAlbumForExport = createServerFn({ method: "GET" })
     return toAlbum(album);
   });
 
-/** Photos d'un album pour l'export, avec URL signées. Même règle RLS. */
+/** Colonnes dont le studio du livre a besoin. */
+const STUDIO_COLUMNS =
+  "id, album_id, user_id, storage_path, print_path, url, caption, order_index, created_at, crop_x, crop_y, crop_zoom, fit, aspect_ratio, taken_at, latitude, longitude, place, people, mood, face_count, width, height, dominant_color, upload_status, mime_type, file_hash, thumb_url, display_url, urls_expire_at";
+
+/** Photos d'un album pour le studio et l'export, avec URL signées. Même règle RLS. */
 export const getPhotosForExport = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data) => z.object({ albumId: z.string().uuid() }).parse(data))
   .handler(async ({ context, data }): Promise<PhotoWithSignedUrl[]> => {
     const { data: photos, error } = await context.supabase
       .from("photos")
-      .select("*")
+      .select(STUDIO_COLUMNS)
       .eq("album_id", data.albumId)
+      .eq("upload_status", "done")
       .order("order_index", { ascending: true })
       .order("created_at", { ascending: true });
 
     if (error) throw error;
     if (!photos || photos.length === 0) return [];
 
-    return signPhotos(context.supabase.storage, photos, 60 * 60 * 6);
+    // L'administrateur consulte l'album d'un client : il ne peut pas écrire
+    // dans ses lignes, on n'y garde donc pas les URL signées.
+    const withUrls = await withVersionUrls(
+      context.supabase,
+      photos,
+      (row) => row.user_id === context.userId,
+    );
+    // Le fichier d'impression n'est signé que pour l'administration, qui
+    // prépare l'export : l'interface du client ne le charge jamais.
+    const printUrls = (await isAdminUser(context.supabase, context.userId))
+      ? await signPrintFiles(context.supabase, photos)
+      : new Map<string, string>();
+
+    return withUrls.map((photo) => ({
+      ...photo,
+      signedUrl: photo.displayUrl ?? "",
+      thumbUrl: photo.thumbUrl,
+      printUrl: printUrls.get(photo.id) ?? null,
+    }));
   });
 
 /** Tous les albums, tous comptes confondus. Réservé à l'administrateur. */

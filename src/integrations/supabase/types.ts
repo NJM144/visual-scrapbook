@@ -1,314 +1,349 @@
-export type Json =
-  | string
-  | number
-  | boolean
-  | null
-  | { [key: string]: Json | undefined }
-  | Json[]
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
-  }
+    PostgrestVersion: "14.5";
+  };
   public: {
     Tables: {
       albums: {
         Row: {
-          cover_image: string | null
-          cover_photo_id: string | null
-          cover_subtitle: string | null
-          cover_template: string
-          cover_title: string | null
-          created_at: string
-          description: string | null
-          id: string
-          layout: Json | null
-          page_format: string
-          theme: string
-          title: string
-          updated_at: string
-          user_id: string
-        }
+          cover_image: string | null;
+          cover_photo_id: string | null;
+          cover_subtitle: string | null;
+          cover_template: string;
+          cover_title: string | null;
+          created_at: string;
+          description: string | null;
+          id: string;
+          layout: Json | null;
+          page_format: string;
+          theme: string;
+          title: string;
+          updated_at: string;
+          user_id: string;
+        };
         Insert: {
-          cover_image?: string | null
-          cover_photo_id?: string | null
-          cover_subtitle?: string | null
-          cover_template?: string
-          cover_title?: string | null
-          created_at?: string
-          description?: string | null
-          id?: string
-          layout?: Json | null
-          page_format?: string
-          theme?: string
-          title: string
-          updated_at?: string
-          user_id: string
-        }
+          cover_image?: string | null;
+          cover_photo_id?: string | null;
+          cover_subtitle?: string | null;
+          cover_template?: string;
+          cover_title?: string | null;
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          layout?: Json | null;
+          page_format?: string;
+          theme?: string;
+          title: string;
+          updated_at?: string;
+          user_id: string;
+        };
         Update: {
-          cover_image?: string | null
-          cover_photo_id?: string | null
-          cover_subtitle?: string | null
-          cover_template?: string
-          cover_title?: string | null
-          created_at?: string
-          description?: string | null
-          id?: string
-          layout?: Json | null
-          page_format?: string
-          theme?: string
-          title?: string
-          updated_at?: string
-          user_id?: string
-        }
+          cover_image?: string | null;
+          cover_photo_id?: string | null;
+          cover_subtitle?: string | null;
+          cover_template?: string;
+          cover_title?: string | null;
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          layout?: Json | null;
+          page_format?: string;
+          theme?: string;
+          title?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
         Relationships: [
           {
-            foreignKeyName: "albums_cover_photo_id_fkey"
-            columns: ["cover_photo_id"]
-            isOneToOne: false
-            referencedRelation: "photos"
-            referencedColumns: ["id"]
+            foreignKeyName: "albums_cover_photo_id_fkey";
+            columns: ["cover_photo_id"];
+            isOneToOne: false;
+            referencedRelation: "photos";
+            referencedColumns: ["id"];
           },
-        ]
-      }
+        ];
+      };
       photos: {
         Row: {
-          album_id: string
-          aspect_ratio: number | null
-          caption: string | null
-          created_at: string
-          crop_x: number
-          crop_y: number
-          crop_zoom: number
-          face_count: number | null
-          fit: string
-          id: string
-          latitude: number | null
-          longitude: number | null
-          mood: string | null
-          order_index: number
-          people: string[]
-          place: string | null
-          storage_path: string
-          taken_at: string | null
-          url: string
-          user_id: string
-        }
+          album_id: string;
+          aspect_ratio: number | null;
+          caption: string | null;
+          created_at: string;
+          crop_x: number;
+          crop_y: number;
+          crop_zoom: number;
+          face_count: number | null;
+          fit: string;
+          id: string;
+          latitude: number | null;
+          longitude: number | null;
+          mood: string | null;
+          order_index: number;
+          people: string[];
+          place: string | null;
+          storage_path: string;
+          taken_at: string | null;
+          url: string;
+          user_id: string;
+          width: number | null;
+          height: number | null;
+          thumb_path: string | null;
+          display_path: string | null;
+          print_path: string | null;
+          dominant_color: string | null;
+          file_hash: string | null;
+          file_size: number | null;
+          mime_type: string | null;
+          upload_status: string;
+          thumb_url: string | null;
+          display_url: string | null;
+          urls_expire_at: string | null;
+        };
         Insert: {
-          album_id: string
-          aspect_ratio?: number | null
-          caption?: string | null
-          created_at?: string
-          crop_x?: number
-          crop_y?: number
-          crop_zoom?: number
-          face_count?: number | null
-          fit?: string
-          id?: string
-          latitude?: number | null
-          longitude?: number | null
-          mood?: string | null
-          order_index?: number
-          people?: string[]
-          place?: string | null
-          storage_path: string
-          taken_at?: string | null
-          url: string
-          user_id: string
-        }
+          album_id: string;
+          aspect_ratio?: number | null;
+          caption?: string | null;
+          created_at?: string;
+          crop_x?: number;
+          crop_y?: number;
+          crop_zoom?: number;
+          face_count?: number | null;
+          fit?: string;
+          id?: string;
+          latitude?: number | null;
+          longitude?: number | null;
+          mood?: string | null;
+          order_index?: number;
+          people?: string[];
+          place?: string | null;
+          storage_path: string;
+          taken_at?: string | null;
+          url: string;
+          user_id: string;
+          width?: number | null;
+          height?: number | null;
+          thumb_path?: string | null;
+          display_path?: string | null;
+          print_path?: string | null;
+          dominant_color?: string | null;
+          file_hash?: string | null;
+          file_size?: number | null;
+          mime_type?: string | null;
+          upload_status?: string;
+          thumb_url?: string | null;
+          display_url?: string | null;
+          urls_expire_at?: string | null;
+        };
         Update: {
-          album_id?: string
-          aspect_ratio?: number | null
-          caption?: string | null
-          created_at?: string
-          crop_x?: number
-          crop_y?: number
-          crop_zoom?: number
-          face_count?: number | null
-          fit?: string
-          id?: string
-          latitude?: number | null
-          longitude?: number | null
-          mood?: string | null
-          order_index?: number
-          people?: string[]
-          place?: string | null
-          storage_path?: string
-          taken_at?: string | null
-          url?: string
-          user_id?: string
-        }
+          album_id?: string;
+          aspect_ratio?: number | null;
+          caption?: string | null;
+          created_at?: string;
+          crop_x?: number;
+          crop_y?: number;
+          crop_zoom?: number;
+          face_count?: number | null;
+          fit?: string;
+          id?: string;
+          latitude?: number | null;
+          longitude?: number | null;
+          mood?: string | null;
+          order_index?: number;
+          people?: string[];
+          place?: string | null;
+          storage_path?: string;
+          taken_at?: string | null;
+          url?: string;
+          user_id?: string;
+          width?: number | null;
+          height?: number | null;
+          thumb_path?: string | null;
+          display_path?: string | null;
+          print_path?: string | null;
+          dominant_color?: string | null;
+          file_hash?: string | null;
+          file_size?: number | null;
+          mime_type?: string | null;
+          upload_status?: string;
+          thumb_url?: string | null;
+          display_url?: string | null;
+          urls_expire_at?: string | null;
+        };
         Relationships: [
           {
-            foreignKeyName: "photos_album_id_fkey"
-            columns: ["album_id"]
-            isOneToOne: false
-            referencedRelation: "albums"
-            referencedColumns: ["id"]
+            foreignKeyName: "photos_album_id_fkey";
+            columns: ["album_id"];
+            isOneToOne: false;
+            referencedRelation: "albums";
+            referencedColumns: ["id"];
           },
-        ]
-      }
+        ];
+      };
       user_roles: {
         Row: {
-          created_at: string
-          id: string
-          role: Database["public"]["Enums"]["app_role"]
-          user_id: string
-        }
+          created_at: string;
+          id: string;
+          role: Database["public"]["Enums"]["app_role"];
+          user_id: string;
+        };
         Insert: {
-          created_at?: string
-          id?: string
-          role: Database["public"]["Enums"]["app_role"]
-          user_id: string
-        }
+          created_at?: string;
+          id?: string;
+          role: Database["public"]["Enums"]["app_role"];
+          user_id: string;
+        };
         Update: {
-          created_at?: string
-          id?: string
-          role?: Database["public"]["Enums"]["app_role"]
-          user_id?: string
-        }
-        Relationships: []
-      }
-    }
+          created_at?: string;
+          id?: string;
+          role?: Database["public"]["Enums"]["app_role"];
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+    };
     Views: {
-      [_ in never]: never
-    }
+      [_ in never]: never;
+    };
     Functions: {
+      album_photo_stats: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          album_id: string;
+          photo_count: number;
+          cover_photo_id: string | null;
+        }[];
+      };
       has_role: {
         Args: {
-          _role: Database["public"]["Enums"]["app_role"]
-          _user_id: string
-        }
-        Returns: boolean
-      }
-    }
+          _role: Database["public"]["Enums"]["app_role"];
+          _user_id: string;
+        };
+        Returns: boolean;
+      };
+    };
     Enums: {
-      app_role: "admin" | "user"
-    }
+      app_role: "admin" | "user";
+    };
     CompositeTypes: {
-      [_ in never]: never
-    }
-  }
-}
+      [_ in never]: never;
+    };
+  };
+};
 
-type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
+type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">;
 
-type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
+type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">];
 
 export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
   TableName extends (DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
+    schema: keyof DatabaseWithoutInternals;
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
     : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
+  schema: keyof DatabaseWithoutInternals;
 }
   ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
       DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
-      Row: infer R
+      Row: infer R;
     }
     ? R
     : never
-  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
-        DefaultSchema["Views"])
-    ? (DefaultSchema["Tables"] &
-        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
-        Row: infer R
+  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    ? (DefaultSchema["Tables"] & DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+        Row: infer R;
       }
       ? R
       : never
-    : never
+    : never;
 
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
   TableName extends (DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
+    schema: keyof DatabaseWithoutInternals;
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
     : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
+  schema: keyof DatabaseWithoutInternals;
 }
   ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-      Insert: infer I
+      Insert: infer I;
     }
     ? I
     : never
   : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
     ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-        Insert: infer I
+        Insert: infer I;
       }
       ? I
       : never
-    : never
+    : never;
 
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
   TableName extends (DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
+    schema: keyof DatabaseWithoutInternals;
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
     : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
+  schema: keyof DatabaseWithoutInternals;
 }
   ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-      Update: infer U
+      Update: infer U;
     }
     ? U
     : never
   : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
     ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-        Update: infer U
+        Update: infer U;
       }
       ? U
       : never
-    : never
+    : never;
 
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
+    keyof DefaultSchema["Enums"] | { schema: keyof DatabaseWithoutInternals },
   EnumName extends (DefaultSchemaEnumNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
+    schema: keyof DatabaseWithoutInternals;
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
     : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
+  schema: keyof DatabaseWithoutInternals;
 }
   ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
   : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
     ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
-    : never
+    : never;
 
 export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
-    | keyof DefaultSchema["CompositeTypes"]
-    | { schema: keyof DatabaseWithoutInternals },
+    keyof DefaultSchema["CompositeTypes"] | { schema: keyof DatabaseWithoutInternals },
   CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
+    schema: keyof DatabaseWithoutInternals;
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
     : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
+  schema: keyof DatabaseWithoutInternals;
 }
   ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
   : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
     ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
-    : never
+    : never;
 
 export const Constants = {
   public: {
@@ -316,4 +351,4 @@ export const Constants = {
       app_role: ["admin", "user"],
     },
   },
-} as const
+} as const;

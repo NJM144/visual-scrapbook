@@ -4,8 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { createAlbum, createPhoto } from "@/lib/albums.functions";
-import { readExifMetadata } from "@/lib/exif";
+import { createAlbum } from "@/lib/albums.functions";
 import {
   dateBounds,
   filterByDateRange,
@@ -17,7 +16,9 @@ import {
   type PhotoGroup,
 } from "@/lib/photo-grouping";
 import { createThumbnail, formatBytes } from "@/lib/image-processing";
-import { uploadPhotoFile } from "@/lib/photo-upload";
+import { inspectPhoto, isPhotoFile } from "@/lib/photo-intake";
+import { enqueuePhotos } from "@/lib/upload-queue";
+import { useUploadSnapshot } from "@/hooks/use-uploads";
 import { BookStylePicker } from "@/components/BookStylePicker";
 import { DEFAULT_THEME_ID, findTheme } from "@/lib/book-themes";
 import { DEFAULT_FORMAT_ID, findFormat } from "@/lib/print-formats";
@@ -37,7 +38,7 @@ export const Route = createFileRoute("/_authenticated/albums/import")({
   component: ImportPage,
 });
 
-type Step = "style" | "select" | "analyzing" | "review" | "importing" | "done";
+type Step = "style" | "select" | "analyzing" | "review" | "creating" | "done";
 
 const MODES: { value: GroupingMode; label: string; hint: string }[] = [
   { value: "trip", label: "Par événement", hint: "Coupe l’album après plusieurs jours sans photo" },
@@ -46,8 +47,8 @@ const MODES: { value: GroupingMode; label: string; hint: string }[] = [
   { value: "single", label: "Un seul album", hint: "Tout regrouper d’un bloc" },
 ];
 
-/** Nombre d'envois menés de front : au-delà, un réseau mobile sature. */
-const UPLOAD_CONCURRENCY = 3;
+/** Dates lues de front : les workers les traitent à la file, sans bloquer l'écran. */
+const READ_CONCURRENCY = 4;
 
 const PREVIEW_COUNT = 5;
 
@@ -55,7 +56,6 @@ function ImportPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const addAlbum = useServerFn(createAlbum);
-  const addPhoto = useServerFn(createPhoto);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Le coffret et le thème viennent en premier : ils conditionnent la mise en
@@ -77,9 +77,7 @@ function ImportPage() {
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
 
-  const [uploaded, setUploaded] = useState(0);
-  const [createdAlbums, setCreatedAlbums] = useState(0);
-  const [failures, setFailures] = useState(0);
+  const [createdIds, setCreatedIds] = useState<string[]>([]);
 
   const filtered = useMemo(
     () => filterByDateRange(photos, fromDateInputValue(from), fromDateInputValue(to)),
@@ -104,9 +102,11 @@ function ImportPage() {
   }, [mode, gapDays, from, to]);
 
   const handleFiles = async (fileList: FileList | null) => {
-    const files = Array.from(fileList ?? []).filter((file) => file.type.startsWith("image/"));
+    // Les HEIC arrivent souvent sans type sous Windows : on les reconnaît à
+    // leur extension, faute de quoi ils étaient écartés sans prévenir.
+    const files = Array.from(fileList ?? []).filter(isPhotoFile);
     if (files.length === 0) {
-      toast.error("Aucune image dans la sélection.");
+      toast.error("Aucune photo dans la sélection.");
       return;
     }
 
@@ -114,34 +114,44 @@ function ImportPage() {
     setTotalToAnalyze(files.length);
     setAnalyzed(0);
 
-    const dated: DatedPhoto[] = [];
-    for (let index = 0; index < files.length; index += 1) {
-      const file = files[index];
-      if (!file) continue;
+    // Date et position seulement, lues dans les workers : quelques dizaines de
+    // Ko par fichier, JPEG comme HEIC.
+    const dated: DatedPhoto[] = new Array(files.length);
+    let cursor = 0;
+    let done = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(READ_CONCURRENCY, files.length) }, async () => {
+        while (cursor < files.length) {
+          const index = cursor;
+          cursor += 1;
+          const file = files[index];
+          if (!file) continue;
 
-      // Une seule lecture d'en-tête pour la date et les coordonnées : les lire
-      // séparément doublerait le travail sur des centaines de fichiers.
-      const meta = await readExifMetadata(file);
-      const takenAt = meta.takenAt ?? new Date(file.lastModified || Date.now());
+          const meta = await inspectPhoto(file, false);
+          dated[index] = {
+            id: index + "-" + file.size + "-" + file.name,
+            file,
+            takenAt: meta.takenAt
+              ? new Date(meta.takenAt)
+              : new Date(file.lastModified || Date.now()),
+            source: meta.takenAt ? "exif" : "file",
+            latitude: meta.latitude,
+            longitude: meta.longitude,
+          };
+          done += 1;
+          if (done % 8 === 0 || done === files.length) setAnalyzed(done);
+        }
+      }),
+    );
+    const list = dated.filter(Boolean);
 
-      dated.push({
-        id: index + "-" + file.size + "-" + file.name,
-        file,
-        takenAt,
-        source: meta.takenAt ? "exif" : "file",
-        latitude: meta.latitude,
-        longitude: meta.longitude,
-      });
-      if (index % 8 === 0 || index === files.length - 1) setAnalyzed(index + 1);
-    }
-
-    const bounds = dateBounds(dated);
+    const bounds = dateBounds(list);
     if (bounds) {
       setFrom(toDateInputValue(bounds.min));
       setTo(toDateInputValue(bounds.max));
     }
 
-    setPhotos(dated);
+    setPhotos(list);
     setTitles({});
     setExcluded(new Set());
     setStep("review");
@@ -162,62 +172,23 @@ function ImportPage() {
     });
   };
 
-  /** Envoie les photos d'un album, quelques-unes à la fois. */
-  const uploadGroup = async (albumId: string, userId: string, group: PhotoGroup) => {
-    let cursor = 0;
-    let failed = 0;
-
-    const worker = async () => {
-      while (cursor < group.photos.length) {
-        const index = cursor;
-        cursor += 1;
-        const photo = group.photos[index];
-        if (!photo) continue;
-
-        try {
-          const { path } = await uploadPhotoFile(photo.file, userId, albumId);
-
-          await addPhoto({
-            data: {
-              albumId,
-              storagePath: path,
-              orderIndex: index,
-              takenAt: photo.takenAt.toISOString(),
-              ...(photo.latitude !== null && photo.longitude !== null
-                ? { latitude: photo.latitude, longitude: photo.longitude }
-                : {}),
-            },
-          });
-        } catch {
-          failed += 1;
-        } finally {
-          setUploaded((count) => count + 1);
-        }
-      }
-    };
-
-    await Promise.all(
-      Array.from({ length: Math.min(UPLOAD_CONCURRENCY, group.photos.length) }, worker),
-    );
-    return failed;
-  };
-
+  /**
+   * Crée les albums puis confie les photos à la file d'envoi. Elle tourne en
+   * arrière-plan : on peut quitter la page, recharger ou perdre le réseau,
+   * l'envoi reprend. Les originaux partent intacts, pour l'impression.
+   */
   const startImport = async () => {
     if (kept.length === 0) return;
 
-    setStep("importing");
-    setUploaded(0);
-    setCreatedAlbums(0);
-    setFailures(0);
-
-    let albumsDone = 0;
-    let failed = 0;
+    setStep("creating");
+    setCreatedIds([]);
 
     try {
       const { data: sessionData } = await supabase.auth.getUser();
       const userId = sessionData.user?.id;
       if (!userId) throw new Error("Session expirée, reconnectez-vous.");
 
+      const ids: string[] = [];
       for (const group of kept) {
         const title = (titles[group.id] ?? group.title).trim() || group.title;
         const count = group.photos.length;
@@ -234,17 +205,24 @@ function ImportPage() {
           },
         });
 
-        failed += await uploadGroup(album.id, userId, group);
-        albumsDone += 1;
-        setCreatedAlbums(albumsDone);
+        enqueuePhotos({
+          albumId: album.id,
+          userId,
+          files: group.photos.map((photo) => ({ file: photo.file, takenAt: photo.takenAt })),
+          startOrder: 0,
+        });
+        ids.push(album.id);
+        setCreatedIds([...ids]);
       }
 
-      setFailures(failed);
       await queryClient.invalidateQueries({ queryKey: ["albums"] });
       setStep("done");
-
-      if (failed > 0) toast.warning(failed + " photo(s) n’ont pas pu être envoyées.");
-      else toast.success(albumsDone + " album(s) créé(s).");
+      toast.success(
+        ids.length +
+          " album" +
+          (ids.length > 1 ? "s créés" : " créé") +
+          ", envoi des photos en cours.",
+      );
     } catch (error) {
       setStep("review");
       toast.error(error instanceof Error ? error.message : "Import impossible");
@@ -278,7 +256,7 @@ function ImportPage() {
         <input
           ref={inputRef}
           type="file"
-          accept="image/*"
+          accept="image/*,.heic,.heif"
           multiple
           className="hidden"
           onChange={(event) => handleFiles(event.target.files)}
@@ -330,29 +308,23 @@ function ImportPage() {
           />
         ) : null}
 
-        {step === "importing" ? (
+        {step === "creating" ? (
           <ProgressPanel
-            title="Envoi en cours…"
-            detail={
-              uploaded +
-              " / " +
-              keptPhotoCount +
-              " photos · " +
-              createdAlbums +
-              " / " +
-              kept.length +
-              " albums"
-            }
-            value={keptPhotoCount === 0 ? 0 : uploaded / keptPhotoCount}
+            title="Création des albums…"
+            detail={createdIds.length + " / " + kept.length + " albums"}
+            value={kept.length === 0 ? 0 : createdIds.length / kept.length}
           />
         ) : null}
 
         {step === "done" ? (
           <DoneStep
-            albums={createdAlbums}
-            photos={uploaded - failures}
-            failures={failures}
-            onSeeAlbums={() => navigate({ to: "/albums" })}
+            albumIds={createdIds}
+            onSeeAlbums={() => {
+              const first = createdIds[0];
+              if (createdIds.length === 1 && first) {
+                navigate({ to: "/albums/$albumId", params: { albumId: first } });
+              } else navigate({ to: "/albums" });
+            }}
             onImportMore={() => {
               setStep("select");
               setPhotos([]);
@@ -564,7 +536,8 @@ function SelectStep({ onPick }: { onPick: () => void }) {
         Choisir mes photos
       </button>
       <p className="mt-6 text-xs text-muted-foreground">
-        Les photos sont réduites sur votre appareil avant l’envoi, pour économiser votre forfait.
+        Les photos partent intactes, en qualité d’impression. L’envoi continue en arrière-plan et
+        reprend tout seul si le réseau coupe.
       </p>
     </div>
   );
@@ -587,34 +560,70 @@ function ProgressPanel({ title, detail, value }: { title: string; detail: string
   );
 }
 
+/**
+ * Albums créés : l'envoi des photos suit son cours, en direct. La file se vide
+ * quelques secondes après la fin : on garde le dernier bilan affiché.
+ */
 function DoneStep({
-  albums,
-  photos,
-  failures,
+  albumIds,
   onSeeAlbums,
   onImportMore,
 }: {
-  albums: number;
-  photos: number;
-  failures: number;
+  albumIds: string[];
   onSeeAlbums: () => void;
   onImportMore: () => void;
 }) {
+  const uploads = useUploadSnapshot();
+  const mine = uploads.items.filter((item) => albumIds.includes(item.albumId));
+  const live = {
+    total: mine.filter((item) => item.stage !== "doublon").length,
+    done: mine.filter((item) => item.stage === "terminé").length,
+    failed: mine.filter((item) => item.stage === "échec").length,
+    duplicates: mine.filter((item) => item.stage === "doublon").length,
+    active: mine.some(
+      (item) =>
+        item.stage === "analyse" || item.stage === "enregistrement" || item.stage === "envoi",
+    ),
+  };
+  const last = useRef(live);
+  if (mine.length > 0) last.current = live;
+  const shown = mine.length > 0 ? live : { ...last.current, active: false };
+
   return (
     <div className="rounded-3xl border border-border bg-card px-6 py-16 text-center">
-      <h2 className="font-serif text-3xl text-foreground">Import terminé</h2>
+      <h2 className="font-serif text-3xl text-foreground">
+        {shown.active ? "Envoi en cours" : "Import terminé"}
+      </h2>
       <p className="mt-3 text-sm text-muted-foreground">
-        {albums} album{albums > 1 ? "s" : ""} créé{albums > 1 ? "s" : ""} · {photos} photo
-        {photos > 1 ? "s" : ""} envoyée{photos > 1 ? "s" : ""}
-        {failures > 0 ? " · " + failures + " échec" + (failures > 1 ? "s" : "") : ""}
+        {albumIds.length} album{albumIds.length > 1 ? "s" : ""} créé
+        {albumIds.length > 1 ? "s" : ""} · {shown.done} / {shown.total} photo
+        {shown.total > 1 ? "s" : ""} envoyée{shown.done > 1 ? "s" : ""}
+        {shown.failed > 0 ? " · " + shown.failed + " échec" + (shown.failed > 1 ? "s" : "") : ""}
+        {shown.duplicates > 0
+          ? " · " + shown.duplicates + " doublon" + (shown.duplicates > 1 ? "s" : "") + " ignoré"
+          : ""}
       </p>
+      {shown.active ? (
+        <>
+          <div className="mx-auto mt-6 h-1.5 w-full max-w-md overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-accent transition-[width] duration-300"
+              style={{ width: Math.round((shown.done / Math.max(1, shown.total)) * 100) + "%" }}
+            />
+          </div>
+          <p className="mx-auto mt-4 max-w-[48ch] text-xs leading-relaxed text-muted-foreground">
+            Vous pouvez quitter cette page : l’envoi continue, et reprend tout seul si le réseau
+            coupe ou si vous fermez l’application.
+          </p>
+        </>
+      ) : null}
       <div className="mt-8 flex flex-wrap justify-center gap-3">
         <button
           type="button"
           onClick={onSeeAlbums}
           className="inline-flex items-center justify-center rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         >
-          Voir mes albums
+          {albumIds.length === 1 ? "Voir l’album" : "Voir mes albums"}
         </button>
         <button
           type="button"

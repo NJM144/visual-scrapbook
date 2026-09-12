@@ -216,7 +216,16 @@ function BookStudio() {
   const format = findFormat(formatId);
   // Les rapports d'aspect guident le découpage des pages : deux photos
   // verticales côte à côte plutôt qu'empilées, c'est autant de rognage évité.
-  const aspects = useMemo(() => photos.map((photo) => photo.aspect_ratio ?? 0), [photos]);
+  // Les dimensions enregistrées à l'import suffisent : plus besoin d'analyser
+  // les photos avant de pouvoir composer selon leur orientation.
+  const aspects = useMemo(
+    () =>
+      photos.map(
+        (photo) =>
+          photo.aspect_ratio ?? (photo.width && photo.height ? photo.width / photo.height : 0),
+      ),
+    [photos],
+  );
   const photoIds = useMemo(() => photos.map((photo) => photo.id), [photos]);
 
   // Le découpage automatique reste calculé même en disposition manuelle : c'est
@@ -566,6 +575,16 @@ function BookStudio() {
       toast.error("Cet album ne contient aucune photo.");
       return;
     }
+    // L'export ne part que des fichiers d'impression : jamais de la version
+    // d'affichage, qui donnerait un livre flou.
+    const missing = photos.filter((photo) => !photo.printUrl).length;
+    if (missing > 0 || (coverPhoto && !coverPhoto.printUrl)) {
+      toast.error(
+        missing +
+          " photo(s) sans fichier d’impression accessible. Rechargez la page ; si l’erreur persiste, ces photos sont encore en cours d’envoi.",
+      );
+      return;
+    }
 
     setExporting(true);
     setProgress({ done: 0, total: photos.length + 2, label: "Préparation…" });
@@ -582,11 +601,13 @@ function BookStudio() {
         theme,
         photos: photos.map((photo) => ({
           id: photo.id,
-          url: photo.signedUrl,
+          url: photo.printUrl as string,
           caption: photo.caption,
           framing: photo.framing,
         })),
-        coverPhoto: coverPhoto ? { id: coverPhoto.id, url: coverPhoto.signedUrl } : undefined,
+        coverPhoto: coverPhoto
+          ? { id: coverPhoto.id, url: coverPhoto.printUrl as string }
+          : undefined,
         coverTemplate: coverTemplateId,
         meta: { title, subtitle: coverSubtitle.trim(), dateLabel },
         onProgress: (done, total, label) => setProgress({ done, total, label }),

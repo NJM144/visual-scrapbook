@@ -9,6 +9,8 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { House, ImagePlus, Images, ShieldCheck } from "lucide-react";
+import { AppEffects } from "@/components/AppEffects";
+import { UploadIndicator } from "@/components/UploadIndicator";
 import { useEffect, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Toaster } from "sonner";
@@ -153,11 +155,14 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <div className="flex min-h-dvh flex-col">
         <Header />
-        {/* Sur téléphone, la navigation du bas recouvre le pied de page :
-            on lui réserve sa hauteur. */}
+        {/* Un écran de hauteur réservé d'emblée : les pages connectées se
+            dessinent côté navigateur, et sans cela le pied de page s'affichait
+            en premier avant de se faire chasser (CLS 0,375 → 0,002 mesuré).
+            Sur téléphone, la navigation du bas recouvre le pied de page : on
+            lui réserve sa hauteur. */}
         <main
           className={
-            "flex-1 " +
+            "min-h-[100svh] flex-1 " +
             (user ? "pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom))] sm:pb-0" : "")
           }
         >
@@ -165,6 +170,7 @@ function RootComponent() {
         </main>
         <Footer />
       </div>
+      <AppEffects userId={user?.id ?? null} />
       {user ? <MobileNav /> : null}
       <Toaster
         position="bottom-center"
@@ -284,6 +290,7 @@ function Header() {
               Administration
             </Link>
           ) : null}
+          {user ? <UploadIndicator /> : null}
           {loading ? null : user ? (
             <Link
               to="/albums/import"
