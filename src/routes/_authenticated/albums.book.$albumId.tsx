@@ -28,8 +28,8 @@ import {
 import { CoverPreview } from "@/components/CoverPreview";
 import { BookStylePicker } from "@/components/BookStylePicker";
 import { BookPages } from "@/components/BookPages";
+import { BookEditor } from "@/components/BookEditor";
 import { PhotoFramer } from "@/components/PhotoFramer";
-import { PageComposer } from "@/components/PageComposer";
 import { useAuth } from "@/hooks/use-auth";
 import { describePhotoAI, suggestAlbumTextsAI } from "@/lib/ai.functions";
 import { createAiThumbnail } from "@/lib/image-processing";
@@ -55,18 +55,21 @@ export const Route = createFileRoute("/_authenticated/albums/book/$albumId")({
   component: BookStudio,
 });
 
-type Tab = "apercu" | "pages" | "mise-en-page" | "apparence";
+type Tab = "apparence" | "livre";
 
 /**
- * Onglets dans l'ordre du travail. Le coffret et le thème ouvrent la marche :
- * le format décide du découpage des pages et le thème de leurs marges, les
- * choisir après avoir composé défaisait la composition.
+ * Deux étapes, pas davantage.
+ *
+ * Le coffret et le thème ouvrent la marche : le format décide du découpage des
+ * pages et le thème de leurs marges, les choisir après avoir composé défaisait
+ * la composition. Tout le reste — déplacer une photo, la cadrer, la légender,
+ * ajouter ou retirer une page — se fait ensuite à même le livre, sur les pages
+ * telles qu'elles s'imprimeront. Composer et regarder ne sont pas deux
+ * moments : c'est le même.
  */
 const TABS: { id: Tab; label: string }[] = [
   { id: "apparence", label: "Coffret et thème" },
-  { id: "mise-en-page", label: "Photos et légendes" },
-  { id: "pages", label: "Pages" },
-  { id: "apercu", label: "Feuilleter" },
+  { id: "livre", label: "Mon livre" },
 ];
 
 function download(blob: Blob, filename: string) {
@@ -250,38 +253,130 @@ function BookStudio() {
   const spine = spineWidthMm(printPlan.pages.length, true);
 
   /**
-   * Ajout et suppression de pages depuis l'aperçu.
+   * La disposition telle qu'elle est affichée, photos orphelines comprises.
    *
-   * On part de la disposition affichée, photos orphelines comprises : chaque
-   * page vue correspond ainsi à une page modifiable, au même rang.
+   * L'éditeur travaille dessus : chaque page vue correspond ainsi à une page
+   * modifiable, au même rang, que la disposition ait été enregistrée ou
+   * qu'elle vienne encore du découpage automatique.
    */
-  const editLayout = (mutate: (pages: AlbumLayout["pages"]) => AlbumLayout["pages"]) => {
-    setLayout({ pages: mutate(layoutFromPlan(plan, photoIds).pages) });
+  const shownLayout = useMemo(() => layoutFromPlan(plan, photoIds), [plan, photoIds]);
+
+  const applyLayout = (next: AlbumLayout) => {
+    setLayout(next);
     setLayoutDirty(true);
   };
 
-  const insertPageAfter = (photoPage: number) =>
-    editLayout((pages) => [
-      ...pages.slice(0, photoPage + 1),
-      { id: "p" + Date.now().toString(36), slots: [null] },
-      ...pages.slice(photoPage + 1),
-    ]);
+  /**
+   * Ce qu'on peut faire à une photo, tel qu'il s'ouvre en la touchant dans le
+   * livre. Le studio garde la main dessus : c'est lui qui tient les légendes
+   * en cours de frappe et sait les enregistrer.
+   */
+  const renderPhotoActions = (photoId: string, close: () => void) => {
+    const index = photos.findIndex((photo) => photo.id === photoId);
+    const photo = photos[index];
+    if (!photo) return null;
 
-  const removeBookPage = (photoPage: number) => {
-    const page = layoutFromPlan(plan, photoIds).pages[photoPage];
-    const filled = page?.slots.filter(Boolean).length ?? 0;
-    if (
-      filled > 0 &&
-      !window.confirm(
-        "Cette page contient " +
-          filled +
-          " photo(s). Elles seront replacées à la fin du livre. Continuer ?",
-      )
-    ) {
-      return;
-    }
-    editLayout((pages) => pages.filter((_, index) => index !== photoPage));
+    return (
+      <div className="space-y-3">
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+            Légende
+          </span>
+          <input
+            type="text"
+            value={captions[photo.id] ?? ""}
+            maxLength={300}
+            placeholder="Légende (facultative)"
+            onChange={(event) =>
+              setCaptions((current) => ({ ...current, [photo.id]: event.target.value }))
+            }
+            onBlur={() => void commitCaption(photo.id)}
+            className="w-full rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+        </label>
+
+        <input
+          type="text"
+          value={moods[photo.id] ?? ""}
+          maxLength={60}
+          placeholder="Ambiance (paisible, festif…)"
+          onChange={(event) =>
+            setMoods((current) => ({ ...current, [photo.id]: event.target.value }))
+          }
+          onBlur={() =>
+            void savePhotoMeta({
+              data: { photoId: photo.id, mood: moods[photo.id] ?? null },
+            }).catch(() => undefined)
+          }
+          className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+        />
+
+        {(photo.face_count ?? 0) > 0 ? (
+          <input
+            type="text"
+            value={peoples[photo.id] ?? ""}
+            maxLength={300}
+            placeholder={
+              photo.face_count === 1
+                ? "Qui est sur la photo ?"
+                : photo.face_count + " personnes — leurs noms, séparés par une virgule"
+            }
+            onChange={(event) =>
+              setPeoples((current) => ({ ...current, [photo.id]: event.target.value }))
+            }
+            onBlur={() =>
+              void savePhotoMeta({
+                data: {
+                  photoId: photo.id,
+                  people: (peoples[photo.id] ?? "")
+                    .split(",")
+                    .map((name) => name.trim())
+                    .filter(Boolean),
+                },
+              }).catch(() => undefined)
+            }
+            className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+        ) : null}
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setOpenFramer(openFramer === photo.id ? null : photo.id)}
+            className={
+              "h-11 flex-1 rounded-full border px-4 text-sm transition-colors " +
+              (openFramer === photo.id ? "border-terre bg-terre/10" : "border-input hover:bg-muted")
+            }
+          >
+            {openFramer === photo.id ? "Fermer le cadrage" : "Cadrer"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              close();
+              void handleDeletePhoto(photo.id, photo.storage_path);
+            }}
+            className="h-11 rounded-full border border-input px-4 text-sm text-destructive transition-colors hover:bg-destructive/10"
+          >
+            Supprimer
+          </button>
+        </div>
+
+        {openFramer === photo.id ? (
+          <div className="border-t border-border pt-4">
+            <PhotoFramer
+              url={photo.signedUrl}
+              slotAspect={slotAspects.get(index) ?? 1}
+              framing={photo.framing}
+              paperColor={theme.paper}
+              onChange={(next) => void commitFraming(photo.id, next)}
+            />
+          </div>
+        ) : null}
+      </div>
+    );
   };
+
   const coverPhoto = photos.find((photo) => photo.id === coverPhotoId) ?? photos[0];
   const coverDpi = effectiveDpi(2048, format.widthMm);
   const title = coverTitle.trim() || album?.title || "Album";
@@ -290,20 +385,6 @@ function BookStudio() {
     month: "long",
     year: "numeric",
   });
-
-  const move = (index: number, delta: number) => {
-    setOrder((current) => {
-      const target = index + delta;
-      if (target < 0 || target >= current.length) return current;
-
-      const next = [...current];
-      const [moved] = next.splice(index, 1);
-      if (!moved) return current;
-      next.splice(target, 0, moved);
-      return next;
-    });
-    setOrderDirty(true);
-  };
 
   const commitCaption = async (photoId: string) => {
     const value = captions[photoId] ?? "";
@@ -552,9 +633,9 @@ function BookStudio() {
   };
 
   const goToTab = (next: Tab) => {
-    // Passer en disposition manuelle fige le découpage courant : sans cela
-    // l'auteur n'aurait rien à réarranger.
-    if (next === "pages" && !layout && photos.length > 0) {
+    // Entrer dans le livre fige le découpage courant : sans cela l'auteur
+    // n'aurait rien à réarranger.
+    if (next === "livre" && !layout && photos.length > 0) {
       setLayout(layoutFromPlan(autoPlan, photoIds));
     }
     setTab(next);
@@ -706,9 +787,9 @@ function BookStudio() {
           ))}
         </div>
 
-        {tab === "apercu" ? (
+        {tab === "livre" ? (
           <section>
-            <div className="mb-10 max-w-sm">
+            <div className="mb-8 max-w-sm">
               <CoverPreview
                 theme={theme}
                 format={format}
@@ -718,12 +799,73 @@ function BookStudio() {
                 templateId={coverTemplateId}
               />
             </div>
+
             {photos.length === 0 ? (
               <p className="rounded-3xl border border-dashed border-border px-6 py-16 text-center text-sm text-muted-foreground">
                 Ajoutez des photos à l’album pour composer le livre.
               </p>
             ) : (
               <>
+                {isOwner ? (
+                  <p className="mb-6 max-w-[70ch] text-sm leading-relaxed text-muted-foreground">
+                    Voici votre livre tel qu’il s’imprimera.{" "}
+                    <strong className="font-medium text-foreground">Touchez une photo</strong> pour
+                    sa légende, son cadrage ou la retirer ;{" "}
+                    <strong className="font-medium text-foreground">gardez le doigt appuyé</strong>{" "}
+                    pour la déplacer vers une autre case. Sous chaque page : ajouter ou retirer un
+                    emplacement, insérer une page, la supprimer.
+                  </p>
+                ) : null}
+
+                {isOwner ? (
+                  <section className="mb-6 rounded-3xl border border-terre/40 bg-terre/5 p-6">
+                    <h3 className="font-serif text-2xl text-foreground">Réajuster avec l’IA</h3>
+                    <p className="mt-2 max-w-[68ch] text-sm text-muted-foreground">
+                      Un modèle de vision regarde chaque photo et en déduit une légende, la position
+                      du sujet — qui devient le point de cadrage, donc plus de visage coupé — et
+                      s’il faut la montrer entière. Il propose ensuite un titre de couverture.
+                      Fonctionne aussi sur un album déjà composé : les réglages existants sont
+                      remplacés.
+                    </p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Vos photos sont envoyées au service d’analyse pour cette opération, en version
+                      réduite.
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={runAiAdjust}
+                      disabled={aiRunning || photos.length === 0}
+                      className="mt-5 rounded-full bg-terre px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-terre/90 disabled:opacity-60"
+                    >
+                      {aiRunning ? "Analyse en cours…" : "Réajuster tout l’album"}
+                    </button>
+
+                    {aiStep ? (
+                      <div className="mt-5 max-w-md">
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-terre transition-[width]"
+                            style={{
+                              width:
+                                Math.round((aiStep.done / Math.max(1, aiStep.total)) * 100) + "%",
+                            }}
+                          />
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">{aiStep.label}</p>
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+
+                {attention.length > 0 ? (
+                  <p className="mb-6 rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-foreground">
+                    {attention.length} photo(s) perdent plus de 30 % de leur surface au cadrage
+                    automatique dans ce format. Touchez-les pour ouvrir leur cadrage, ou passez-les
+                    en «&nbsp;photo entière&nbsp;».
+                  </p>
+                ) : null}
+
                 {printPlan.paddingPages > 0 ? (
                   <p className="mb-6 rounded-2xl bg-muted/60 p-4 text-sm leading-relaxed text-muted-foreground">
                     Une reliure demande au moins 24 pages, par multiples de 4 : à l’impression,{" "}
@@ -733,244 +875,44 @@ function BookStudio() {
                     les remplir.
                   </p>
                 ) : null}
-                <BookPages
-                  plan={plan}
-                  theme={theme}
-                  photos={photos.map((photo) => ({
-                    id: photo.id,
-                    signedUrl: photo.signedUrl,
-                    thumbUrl: photo.thumbUrl,
-                    caption: photo.caption,
-                    framing: photo.framing,
-                  }))}
-                  title={title}
-                  subtitle={coverSubtitle}
-                  dateLabel={dateLabel}
-                  onInsertAfter={isOwner ? insertPageAfter : undefined}
-                  onRemove={isOwner ? removeBookPage : undefined}
-                />
+
+                {isOwner ? (
+                  <BookEditor
+                    plan={plan}
+                    layout={shownLayout}
+                    onLayoutChange={applyLayout}
+                    theme={theme}
+                    photos={photos}
+                    title={title}
+                    subtitle={coverSubtitle}
+                    dateLabel={dateLabel}
+                    renderPhotoActions={renderPhotoActions}
+                  />
+                ) : (
+                  <BookPages
+                    plan={plan}
+                    theme={theme}
+                    photos={photos}
+                    title={title}
+                    subtitle={coverSubtitle}
+                    dateLabel={dateLabel}
+                  />
+                )}
+
+                {layout ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLayout(null);
+                      setLayoutDirty(true);
+                    }}
+                    className="mt-4 block text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                  >
+                    Revenir à la disposition automatique
+                  </button>
+                ) : null}
               </>
             )}
-          </section>
-        ) : null}
-
-        {tab === "pages" ? (
-          <section>
-            {photos.length === 0 ? (
-              <p className="rounded-3xl border border-dashed border-border px-6 py-16 text-center text-sm text-muted-foreground">
-                Ajoutez des photos à l’album pour composer les pages.
-              </p>
-            ) : layout ? (
-              <>
-                <PageComposer
-                  layout={layout}
-                  photos={photos.map((photo) => ({
-                    id: photo.id,
-                    signedUrl: photo.signedUrl,
-                    thumbUrl: photo.thumbUrl,
-                  }))}
-                  format={format}
-                  theme={theme}
-                  onChange={(next) => {
-                    setLayout(next);
-                    setLayoutDirty(true);
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLayout(null);
-                    setLayoutDirty(true);
-                  }}
-                  className="mt-4 text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-                >
-                  Revenir à la disposition automatique
-                </button>
-              </>
-            ) : null}
-          </section>
-        ) : null}
-
-        {tab === "mise-en-page" ? (
-          <section>
-            <p className="mb-4 max-w-[70ch] text-sm text-muted-foreground">
-              L’ordre ci-dessous est celui des pages. Déplacez une photo avec les flèches, écrivez
-              sa légende, et cliquez sur <strong className="font-medium">Cadrer</strong> pour
-              choisir ce qui reste visible dans le cadre.
-            </p>
-
-            <section className="mb-6 rounded-3xl border border-terre/40 bg-terre/5 p-6">
-              <h3 className="font-serif text-2xl text-foreground">Réajuster avec l’IA</h3>
-              <p className="mt-2 max-w-[68ch] text-sm text-muted-foreground">
-                Un modèle de vision regarde chaque photo et en déduit une légende, la position du
-                sujet — qui devient le point de cadrage, donc plus de visage coupé — et s’il faut la
-                montrer entière. Il propose ensuite un titre de couverture. Fonctionne aussi sur un
-                album déjà composé : les réglages existants sont remplacés.
-              </p>
-              <p className="mt-2 text-xs text-muted-foreground">
-                Vos photos sont envoyées au service d’analyse pour cette opération, en version
-                réduite.
-              </p>
-
-              <button
-                type="button"
-                onClick={runAiAdjust}
-                disabled={aiRunning || photos.length === 0}
-                className="mt-5 rounded-full bg-terre px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-terre/90 disabled:opacity-60"
-              >
-                {aiRunning ? "Analyse en cours…" : "Réajuster tout l’album"}
-              </button>
-
-              {aiStep ? (
-                <div className="mt-5 max-w-md">
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-terre transition-[width]"
-                      style={{
-                        width: Math.round((aiStep.done / Math.max(1, aiStep.total)) * 100) + "%",
-                      }}
-                    />
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">{aiStep.label}</p>
-                </div>
-              ) : null}
-            </section>
-
-            {attention.length > 0 ? (
-              <p className="mb-6 rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-foreground">
-                {attention.length} photo(s) perdent plus de 30 % de leur surface au cadrage
-                automatique dans ce format. Ouvrez leur cadrage, ou passez-les en «&nbsp;photo
-                entière&nbsp;».
-              </p>
-            ) : null}
-            <ol className="space-y-3">
-              {photos.map((photo, index) => (
-                <li key={photo.id} className="rounded-2xl border border-border bg-card p-3">
-                  <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-                    <span className="w-6 shrink-0 text-center text-sm text-muted-foreground">
-                      {index + 1}
-                    </span>
-                    <img
-                      src={photo.thumbUrl || photo.signedUrl}
-                      alt=""
-                      loading="lazy"
-                      decoding="async"
-                      className="size-16 shrink-0 rounded-xl object-cover"
-                    />
-                    <input
-                      type="text"
-                      value={captions[photo.id] ?? ""}
-                      maxLength={300}
-                      placeholder="Légende (facultative)"
-                      onChange={(event) =>
-                        setCaptions((current) => ({ ...current, [photo.id]: event.target.value }))
-                      }
-                      onBlur={() => void commitCaption(photo.id)}
-                      className="min-w-0 flex-1 basis-full rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-ring sm:basis-auto"
-                    />
-                    <span className="flex w-full shrink-0 justify-end gap-2 sm:w-auto sm:gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setOpenFramer(openFramer === photo.id ? null : photo.id)}
-                        className={
-                          "h-11 rounded-full border px-4 text-sm transition-colors " +
-                          (openFramer === photo.id
-                            ? "border-terre bg-terre/10"
-                            : "border-input hover:bg-muted")
-                        }
-                      >
-                        Cadrer
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => move(index, -1)}
-                        disabled={index === 0}
-                        aria-label="Déplacer avant"
-                        className="size-11 rounded-full border border-input text-sm transition-colors hover:bg-muted disabled:opacity-40"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => move(index, 1)}
-                        disabled={index === photos.length - 1}
-                        aria-label="Déplacer après"
-                        className="size-11 rounded-full border border-input text-sm transition-colors hover:bg-muted disabled:opacity-40"
-                      >
-                        ↓
-                      </button>
-                      {isOwner ? (
-                        <button
-                          type="button"
-                          onClick={() => void handleDeletePhoto(photo.id, photo.storage_path)}
-                          aria-label="Supprimer cette photo"
-                          className="size-11 rounded-full border border-input text-destructive transition-colors hover:bg-destructive/10"
-                        >
-                          ✕
-                        </button>
-                      ) : null}
-                    </span>
-                  </div>
-
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <input
-                      type="text"
-                      value={moods[photo.id] ?? ""}
-                      maxLength={60}
-                      placeholder="Ambiance (paisible, festif…)"
-                      onChange={(event) =>
-                        setMoods((current) => ({ ...current, [photo.id]: event.target.value }))
-                      }
-                      onBlur={() =>
-                        void savePhotoMeta({
-                          data: { photoId: photo.id, mood: moods[photo.id] ?? null },
-                        }).catch(() => undefined)
-                      }
-                      className="rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
-                    />
-                    {(photo.face_count ?? 0) > 0 ? (
-                      <input
-                        type="text"
-                        value={peoples[photo.id] ?? ""}
-                        maxLength={300}
-                        placeholder={
-                          photo.face_count === 1
-                            ? "Qui est sur la photo ?"
-                            : photo.face_count + " personnes — leurs noms, séparés par une virgule"
-                        }
-                        onChange={(event) =>
-                          setPeoples((current) => ({ ...current, [photo.id]: event.target.value }))
-                        }
-                        onBlur={() =>
-                          void savePhotoMeta({
-                            data: {
-                              photoId: photo.id,
-                              people: (peoples[photo.id] ?? "")
-                                .split(",")
-                                .map((name) => name.trim())
-                                .filter(Boolean),
-                            },
-                          }).catch(() => undefined)
-                        }
-                        className="rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
-                      />
-                    ) : null}
-                  </div>
-
-                  {openFramer === photo.id ? (
-                    <div className="mt-4 max-w-md border-t border-border pt-4">
-                      <PhotoFramer
-                        url={photo.signedUrl}
-                        slotAspect={slotAspects.get(index) ?? 1}
-                        framing={photo.framing}
-                        paperColor={theme.paper}
-                        onChange={(next) => void commitFraming(photo.id, next)}
-                      />
-                    </div>
-                  ) : null}
-                </li>
-              ))}
-            </ol>
           </section>
         ) : null}
 
