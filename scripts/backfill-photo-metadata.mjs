@@ -30,11 +30,22 @@ const CONCURRENCY = 4;
 const STATE = "scripts/.backfill-state.json";
 const LOG = "scripts/backfill.log";
 
-const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-const state = fs.existsSync(STATE) ? JSON.parse(fs.readFileSync(STATE, "utf8")) : { lastId: null, done: 0, failed: 0 };
+const supabase = createClient(url, key, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+const state = fs.existsSync(STATE)
+  ? JSON.parse(fs.readFileSync(STATE, "utf8"))
+  : { lastId: null, done: 0, failed: 0 };
 const log = (line) => fs.appendFileSync(LOG, new Date().toISOString() + " " + line + "\n");
 
-const MIME = { jpg: "image/jpeg", png: "image/png", webp: "image/webp", heif: "image/heif", heic: "image/heic", gif: "image/gif" };
+const MIME = {
+  jpg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  heif: "image/heif",
+  heic: "image/heic",
+  gif: "image/gif",
+};
 
 /**
  * Couleur moyenne, et au passage la preuve que le fichier se décode vraiment.
@@ -45,7 +56,11 @@ const MIME = { jpg: "image/jpeg", png: "image/png", webp: "image/webp", heif: "i
  */
 async function inspectPixels(path, buffer) {
   try {
-    const { data } = await sharp(buffer).resize(8, 8, { fit: "fill" }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    const { data } = await sharp(buffer)
+      .resize(8, 8, { fit: "fill" })
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
     return { color: average(data), readable: true };
   } catch {
     // HEIC : sharp ne le décode pas, on passe par une transformation Supabase.
@@ -57,7 +72,11 @@ async function inspectPixels(path, buffer) {
       const response = await fetch(signed.signedUrl);
       if (!response.ok) return { color: null, readable: false };
       const small = Buffer.from(await response.arrayBuffer());
-      const { data } = await sharp(small).resize(8, 8, { fit: "fill" }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      const { data } = await sharp(small)
+        .resize(8, 8, { fit: "fill" })
+        .removeAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
       return { color: average(data), readable: true };
     } catch {
       return { color: null, readable: false };
@@ -66,14 +85,19 @@ async function inspectPixels(path, buffer) {
 }
 
 function average(data) {
-  let r = 0, g = 0, b = 0;
+  let r = 0,
+    g = 0,
+    b = 0;
   for (let i = 0; i < data.length; i += 3) {
     r += data[i];
     g += data[i + 1];
     b += data[i + 2];
   }
   const n = data.length / 3;
-  const hex = (v) => Math.round(v / n).toString(16).padStart(2, "0");
+  const hex = (v) =>
+    Math.round(v / n)
+      .toString(16)
+      .padStart(2, "0");
   return "#" + hex(r) + hex(g) + hex(b);
 }
 
@@ -108,7 +132,13 @@ async function processPhoto(photo) {
       const { error } = await supabase.from("photos").update(patch).eq("id", photo.id);
       if (error) throw new Error("mise à jour : " + error.message);
     }
-    return { ...patch, width: photo.width, height: photo.height, dominant_color: photo.dominant_color, upload_status: photo.upload_status };
+    return {
+      ...patch,
+      width: photo.width,
+      height: photo.height,
+      dominant_color: photo.dominant_color,
+      upload_status: photo.upload_status,
+    };
   }
   const { data: blob, error } = await supabase.storage.from("photos").download(path);
   if (error || !blob) throw new Error("téléchargement : " + (error?.message ?? "vide"));
@@ -117,14 +147,16 @@ async function processPhoto(photo) {
   const size = imageSize(buffer);
   let width = size.width ?? null;
   let height = size.height ?? null;
-  if (width && height && size.orientation && size.orientation >= 5) [width, height] = [height, width];
+  if (width && height && size.orientation && size.orientation >= 5)
+    [width, height] = [height, width];
 
   const pixels = await inspectPixels(path, buffer);
   const patch = {
     print_path: path,
     width: photo.width ?? width,
     height: photo.height ?? height,
-    aspect_ratio: photo.aspect_ratio ?? (width && height ? Number((width / height).toFixed(4)) : null),
+    aspect_ratio:
+      photo.aspect_ratio ?? (width && height ? Number((width / height).toFixed(4)) : null),
     dominant_color: photo.dominant_color ?? pixels.color,
     file_hash: crypto.createHash("sha256").update(buffer).digest("hex"),
     file_size: buffer.length,
@@ -145,7 +177,12 @@ async function processPhoto(photo) {
 }
 
 async function run() {
-  log("début" + (DRY_RUN ? " (essai à blanc)" : "") + ", reprise après " + (state.lastId ?? "le début"));
+  log(
+    "début" +
+      (DRY_RUN ? " (essai à blanc)" : "") +
+      ", reprise après " +
+      (state.lastId ?? "le début"),
+  );
   for (;;) {
     // Il manque l'empreinte (premier passage) ou les URL des versions.
     let query = supabase
@@ -194,7 +231,9 @@ async function run() {
     console.log(state.done + " traitées, " + state.failed + " échecs");
   }
   log("fin : " + state.done + " traitées, " + state.failed + " échecs");
-  console.log("Terminé : " + state.done + " traitées, " + state.failed + " échecs. Journal : " + LOG);
+  console.log(
+    "Terminé : " + state.done + " traitées, " + state.failed + " échecs. Journal : " + LOG,
+  );
 }
 
 run().catch((e) => {
