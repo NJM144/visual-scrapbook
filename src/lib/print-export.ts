@@ -14,7 +14,7 @@
 
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { strToU8, zipSync } from "fflate";
-import { BLEED_MM, effectiveDpi, mmToPt, mmToPx, spineWidthMm } from "./print-formats";
+import { BLEED_MM, MIN_PRINT_DPI, mmToPt, mmToPx, spineWidthMm } from "./print-formats";
 import { hexToRgb01, type BookTheme } from "./book-themes";
 import type { BookPlan } from "./book-layout";
 import {
@@ -24,7 +24,7 @@ import {
   motifPath,
   resolveMotif,
 } from "./cover-templates";
-import { computePlacement, normalizeFraming, type Framing } from "./photo-framing";
+import { computePlacement, normalizeFraming, printedDpi, type Framing } from "./photo-framing";
 
 /** Marge extérieure portant les traits de coupe, au-delà du fond perdu. */
 const MARKS_MM = 8;
@@ -70,7 +70,7 @@ function color(hex: string) {
 
 /* ------------------------------------------------------------------ images */
 
-type Rendered = { bytes: Uint8Array; sourceWidth: number };
+type Rendered = { bytes: Uint8Array; sourceWidth: number; sourceHeight: number };
 
 const renderCache = new Map<string, ImageBitmap>();
 
@@ -131,6 +131,7 @@ async function renderSlot(
   return {
     bytes: new Uint8Array(await blob.arrayBuffer()),
     sourceWidth: bitmap.width,
+    sourceHeight: bitmap.height,
   };
 }
 
@@ -460,8 +461,15 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
         sheet.page.drawText(text, { x: p.x, y: p.y, size, font: italic, color: color(theme.ink) });
       }
 
-      const dpi = effectiveDpi(rendered.sourceWidth, slot.widthMm);
-      if (dpi < 240) {
+      // Même calcul que le badge du studio : l'écran a déjà prévenu de ce chiffre.
+      const dpi = printedDpi(
+        rendered.sourceWidth,
+        rendered.sourceHeight,
+        slot.widthMm,
+        imageHeight,
+        normalizeFraming(photo.framing),
+      );
+      if (dpi < MIN_PRINT_DPI) {
         warnings.push(
           "Photo " +
             (slot.photoIndex + 1) +
@@ -734,7 +742,11 @@ function buildSpecSheet(
   if (warnings.length > 0) {
     lines.push("POINTS DE VIGILANCE", ...warnings.map((w) => "  - " + w), "");
   } else {
-    lines.push("POINTS DE VIGILANCE", "  Aucun : toutes les photos depassent 240 dpi.", "");
+    lines.push(
+      "POINTS DE VIGILANCE",
+      "  Aucun : toutes les photos depassent " + MIN_PRINT_DPI + " dpi.",
+      "",
+    );
   }
 
   return lines.join("\n");

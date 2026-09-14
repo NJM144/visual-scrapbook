@@ -17,7 +17,7 @@ import {
   updatePhotoMeta,
 } from "@/lib/albums.functions";
 import { findTheme } from "@/lib/book-themes";
-import { findFormat, spineWidthMm, effectiveDpi } from "@/lib/print-formats";
+import { findFormat, spineWidthMm, effectiveDpi, MIN_PRINT_DPI } from "@/lib/print-formats";
 import {
   layoutFromPlan,
   planBook,
@@ -27,13 +27,13 @@ import {
 } from "@/lib/book-layout";
 import { CoverPreview } from "@/components/CoverPreview";
 import { BookStylePicker } from "@/components/BookStylePicker";
-import { BookPages } from "@/components/BookPages";
+import { BookPages, CAPTION_BAND_MM } from "@/components/BookPages";
 import { BookEditor } from "@/components/BookEditor";
 import { PhotoFramer } from "@/components/PhotoFramer";
 import { useAuth } from "@/hooks/use-auth";
 import { describePhotoAI, suggestAlbumTextsAI } from "@/lib/ai.functions";
 import { createAiThumbnail } from "@/lib/image-processing";
-import { normalizeFraming, type Framing } from "@/lib/photo-framing";
+import { normalizeFraming, printedDpi, type Framing } from "@/lib/photo-framing";
 import {
   analyzePhoto,
   photosNeedingAttention,
@@ -247,6 +247,33 @@ function BookStudio() {
     }
     return map;
   }, [plan]);
+  /**
+   * Définition de chaque photo dans son emplacement, telle qu'elle sortira.
+   *
+   * Même prélèvement que l'export : le chiffre du badge est celui de la fiche
+   * technique. Il suit le cadrage en direct — zoomer dans une photo la rend
+   * plus molle, et l'auteur le voit avant l'imprimeur.
+   */
+  const dpiByIndex = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const page of plan.pages) {
+      for (const slot of page.slots) {
+        const photo = photos[slot.photoIndex];
+        if (!photo?.width || !photo.height) continue;
+        const caption = photo.caption?.trim() ?? "";
+        const imageHeight = caption ? Math.max(10, slot.heightMm - CAPTION_BAND_MM) : slot.heightMm;
+        map.set(
+          slot.photoIndex,
+          printedDpi(photo.width, photo.height, slot.widthMm, imageHeight, photo.framing),
+        );
+      }
+    }
+    return map;
+  }, [plan, photos]);
+  const softCount = useMemo(
+    () => [...dpiByIndex.values()].filter((dpi) => dpi < MIN_PRINT_DPI).length,
+    [dpiByIndex],
+  );
   // Ce que reçoit l'imprimeur : le livre complété en pages blanches. L'écran,
   // lui, ne montre que les pages composées.
   const printPlan = useMemo(() => withPrintPadding(plan), [plan]);
@@ -275,9 +302,23 @@ function BookStudio() {
     const index = photos.findIndex((photo) => photo.id === photoId);
     const photo = photos[index];
     if (!photo) return null;
+    const dpi = dpiByIndex.get(index);
 
     return (
       <div className="space-y-3">
+        {dpi !== undefined ? (
+          <p
+            className={
+              "text-xs " +
+              (dpi < MIN_PRINT_DPI ? "font-medium text-amber-700" : "text-muted-foreground")
+            }
+          >
+            ≈ {dpi} dpi dans ce cadre
+            {dpi < MIN_PRINT_DPI
+              ? " — sortira floue à l’impression. Moins de zoom, ou une case plus petite."
+              : " — nette à l’impression."}
+          </p>
+        ) : null}
         <label className="block">
           <span className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
             Légende
@@ -866,6 +907,15 @@ function BookStudio() {
                   </p>
                 ) : null}
 
+                {softCount > 0 ? (
+                  <p className="mb-6 rounded-2xl border border-amber-600/40 bg-amber-50 p-4 text-sm leading-relaxed text-foreground dark:bg-amber-950/30">
+                    {softCount} photo{softCount > 1 ? "s" : ""} sortira{softCount > 1 ? "ient" : ""}{" "}
+                    floue{softCount > 1 ? "s" : ""} dans ce format : sous {MIN_PRINT_DPI} dpi, badge
+                    orange dans le livre. Réduisez le zoom de la photo, donnez-lui une case plus
+                    petite, ou choisissez un coffret plus petit.
+                  </p>
+                ) : null}
+
                 {printPlan.paddingPages > 0 ? (
                   <p className="mb-6 rounded-2xl bg-muted/60 p-4 text-sm leading-relaxed text-muted-foreground">
                     Une reliure demande au moins 24 pages, par multiples de 4 : à l’impression,{" "}
@@ -887,6 +937,8 @@ function BookStudio() {
                     subtitle={coverSubtitle}
                     dateLabel={dateLabel}
                     renderPhotoActions={renderPhotoActions}
+                    dpiByIndex={dpiByIndex}
+                    minDpi={MIN_PRINT_DPI}
                   />
                 ) : (
                   <BookPages
@@ -896,6 +948,8 @@ function BookStudio() {
                     title={title}
                     subtitle={coverSubtitle}
                     dateLabel={dateLabel}
+                    dpiByIndex={dpiByIndex}
+                    minDpi={MIN_PRINT_DPI}
                   />
                 )}
 

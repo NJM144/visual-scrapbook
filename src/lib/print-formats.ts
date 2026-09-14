@@ -17,6 +17,12 @@ export const SAFETY_MM = 5;
 export const DPI = 300;
 
 /**
+ * En dessous, la photo sort visiblement molle. On prévient, on n'empêche
+ * pas : c'est l'auteur qui décide, mais avant la facture.
+ */
+export const MIN_PRINT_DPI = 240;
+
+/**
  * Les feuilles sont pliées puis assemblées : le nombre de pages est
  * nécessairement un multiple de 4.
  */

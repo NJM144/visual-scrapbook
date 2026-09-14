@@ -28,6 +28,8 @@ export function BookEditor({
   subtitle,
   dateLabel,
   renderPhotoActions,
+  dpiByIndex,
+  minDpi,
 }: {
   plan: BookPlan;
   /** Disposition correspondant au plan affiché, page pour page. */
@@ -39,6 +41,8 @@ export function BookEditor({
   subtitle: string;
   dateLabel: string;
   renderPhotoActions: (photoId: string, close: () => void) => ReactNode;
+  dpiByIndex?: ReadonlyMap<number, number> | undefined;
+  minDpi?: number | undefined;
 }) {
   /** Photo dont le panneau d'actions est ouvert. */
   const [openPhoto, setOpenPhoto] = useState<string | null>(null);
@@ -136,6 +140,8 @@ export function BookEditor({
         title={title}
         subtitle={subtitle}
         dateLabel={dateLabel}
+        dpiByIndex={dpiByIndex}
+        minDpi={minDpi}
         edit={{
           onSlotPointerDown: drag.handlePointerDown,
           hoverKey: drag.hoverKey,

@@ -46,7 +46,7 @@ export interface BookEditControls {
 }
 
 /** Doit rester égal à CAPTION_BAND_MM dans print-export.ts. */
-const CAPTION_BAND_MM = 7;
+export const CAPTION_BAND_MM = 7;
 
 export function BookPages({
   plan,
@@ -56,6 +56,8 @@ export function BookPages({
   subtitle,
   dateLabel,
   edit,
+  dpiByIndex,
+  minDpi,
 }: {
   plan: BookPlan;
   theme: BookTheme;
@@ -64,6 +66,13 @@ export function BookPages({
   subtitle: string;
   dateLabel: string;
   edit?: BookEditControls | undefined;
+  /**
+   * Définition de chaque photo dans son emplacement, par indice. Celles qui
+   * passent sous `minDpi` portent un badge : mieux vaut le voir ici que sur
+   * le livre imprimé.
+   */
+  dpiByIndex?: ReadonlyMap<number, number> | undefined;
+  minDpi?: number | undefined;
 }) {
   const { format } = plan;
 
@@ -135,6 +144,8 @@ export function BookPages({
 
                 const key = editable ? slotKey({ page: photoPage, slot: slotPosition }) : null;
                 const caption = photo?.caption?.trim() ?? "";
+                const dpi = photo ? dpiByIndex?.get(slot.photoIndex) : undefined;
+                const soft = dpi !== undefined && minDpi !== undefined && dpi < minDpi;
                 const imageHeight = caption
                   ? Math.max(10, slot.heightMm - CAPTION_BAND_MM)
                   : slot.heightMm;
@@ -227,6 +238,15 @@ export function BookPages({
                         vide
                       </span>
                     )}
+
+                    {soft ? (
+                      <span
+                        className="pointer-events-none absolute left-[3%] top-[3%] rounded-full bg-amber-600/90 px-[1.4cqw] py-[0.5cqw] text-[clamp(0.4rem,1.4cqw,0.6rem)] font-medium leading-none text-white shadow-sm"
+                        title={"Sortira floue : " + dpi + " dpi dans ce cadre"}
+                      >
+                        ≈ {dpi} dpi
+                      </span>
+                    ) : null}
 
                     {/* Le repère du geste : la case visée s'éclaire, la case armée
                         garde son liseré une fois le doigt levé. */}

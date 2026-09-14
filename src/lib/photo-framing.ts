@@ -144,3 +144,27 @@ export function coverLoss(imageAspect: number, slotAspect: number): number {
   const ratio = imageAspect > slotAspect ? slotAspect / imageAspect : imageAspect / slotAspect;
   return 1 - ratio;
 }
+
+/**
+ * Définition de la photo une fois posée dans son emplacement, en points par
+ * pouce. Même prélèvement que l'impression, donc même chiffre : ce que
+ * l'écran annonce est ce qui sortira. L'emplacement se donne en millimètres.
+ */
+export function printedDpi(
+  imageWidth: number,
+  imageHeight: number,
+  slotWidthMm: number,
+  slotHeightMm: number,
+  framing: Framing,
+): number {
+  if (imageWidth <= 0 || imageHeight <= 0 || slotWidthMm <= 0 || slotHeightMm <= 0) return 0;
+  const { source, dw } = computePlacement(
+    imageWidth,
+    imageHeight,
+    slotWidthMm,
+    slotHeightMm,
+    framing,
+  );
+  if (dw <= 0) return 0;
+  return Math.round(source.sw / (dw / 25.4));
+}
