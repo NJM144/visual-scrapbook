@@ -722,6 +722,14 @@ export const updateAlbumLayout = createServerFn({ method: "POST" })
                 z.object({
                   id: z.string().min(1).max(64),
                   slots: z.array(z.string().uuid().nullable()).min(1).max(4),
+                  // Réglages propres à la page (voir PageStyle) : sans eux ici,
+                  // zod les retirerait en silence avant l'écriture.
+                  paper: z
+                    .string()
+                    .regex(/^#[0-9a-fA-F]{6}$/)
+                    .optional(),
+                  wallpaper: z.string().min(1).max(60).nullable().optional(),
+                  flow: z.enum(["auto", "cote", "pile"]).optional(),
                 }),
               )
               .max(300),

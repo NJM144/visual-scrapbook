@@ -2,7 +2,7 @@ import type { BookPlan } from "@/lib/book-layout";
 import type { BookTheme } from "@/lib/book-themes";
 import type { Framing } from "@/lib/photo-framing";
 import { slotKey, type SlotPosition } from "@/lib/use-slot-drag";
-import { wallpaperScreenUrl, type Wallpaper } from "@/lib/wallpapers";
+import { findWallpaper, wallpaperScreenUrl, type Wallpaper } from "@/lib/wallpapers";
 
 /**
  * Le livre tel qu'il s'imprimera, page après page — et l'endroit où on le
@@ -44,6 +44,8 @@ export interface BookEditControls {
   /** Ajoute ou retire un emplacement sur la page. */
   onSlotCount: (photoPage: number, delta: number) => void;
   maxSlots: number;
+  /** Ouvre les réglages propres à la page : couleur, papier peint, orientation. */
+  onPageStyle: (photoPage: number, pageNumber: number) => void;
 }
 
 /** Doit rester égal à CAPTION_BAND_MM dans print-export.ts. */
@@ -99,6 +101,10 @@ export function BookPages({
       {plan.pages.map((page, pageIndex) => {
         const photoPage = photoPageOf[pageIndex] ?? -1;
         const editable = edit && page.kind === "photos" && photoPage >= 0;
+        // Ce que la page décide pour elle-même passe avant le thème et le livre.
+        const paper = page.style?.paper ?? theme.paper;
+        const pageWallpaper =
+          page.style?.wallpaper === undefined ? wallpaper : findWallpaper(page.style.wallpaper);
 
         return (
           <figure
@@ -109,15 +115,15 @@ export function BookPages({
               className="relative overflow-hidden shadow-md ring-1 ring-black/10"
               style={{
                 aspectRatio: format.widthMm + " / " + format.heightMm,
-                backgroundColor: theme.paper,
+                backgroundColor: paper,
                 color: theme.ink,
                 fontFamily: theme.font === "serif" ? "var(--font-serif)" : "var(--font-sans)",
               }}
             >
               {/* Le papier peint d'abord : tout ce qui suit se pose dessus. */}
-              {wallpaper ? (
+              {pageWallpaper ? (
                 <img
-                  src={wallpaperScreenUrl(wallpaper)}
+                  src={wallpaperScreenUrl(pageWallpaper)}
                   alt=""
                   aria-hidden
                   draggable={false}
@@ -206,7 +212,7 @@ export function BookPages({
                           className="block overflow-hidden"
                           style={{
                             height: (imageHeight / slot.heightMm) * 100 + "%",
-                            backgroundColor: theme.paper,
+                            backgroundColor: paper,
                           }}
                         >
                           <img
@@ -309,6 +315,14 @@ export function BookPages({
               </span>
               {editable ? (
                 <span className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => edit.onPageStyle(photoPage, page.number)}
+                    aria-label={"Réglages de la page " + page.number}
+                    className="h-9 rounded-full border border-input px-3 text-xs text-foreground transition-colors hover:bg-muted"
+                  >
+                    Fond
+                  </button>
                   <button
                     type="button"
                     onClick={() => edit.onSlotCount(photoPage, -1)}

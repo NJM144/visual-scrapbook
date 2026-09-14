@@ -24,11 +24,31 @@ export interface PhotoSlot {
   heightMm: number;
 }
 
+/** Orientation des emplacements d'une page à deux ou trois photos. */
+export type PageFlow = "auto" | "cote" | "pile";
+
+/**
+ * Ce qu'une page décide pour elle-même, par-dessus le thème et le livre.
+ *
+ * Chaque champ absent hérite : `paper` du papier du thème, `wallpaper` du
+ * papier peint du livre — `null` y renonce explicitement —, `flow` de
+ * l'orientation des photos.
+ */
+export interface PageStyle {
+  paper?: string;
+  wallpaper?: string | null;
+  flow?: PageFlow;
+}
+
+export const PAGE_FLOWS: PageFlow[] = ["auto", "cote", "pile"];
+
 export interface BookPage {
   kind: PageKind;
   /** Numéro imprimé, 1 pour la première page intérieure. */
   number: number;
   slots: PhotoSlot[];
+  /** Réglages propres à la page, portés jusqu'à l'écran et au PDF. */
+  style?: PageStyle;
 }
 
 export interface BookPlan {
@@ -207,7 +227,29 @@ export function withPrintPadding(plan: BookPlan): BookPlan {
  * intention de mise en page, pas une erreur à combler.
  */
 export interface AlbumLayout {
-  pages: { id: string; slots: (string | null)[] }[];
+  pages: ({ id: string; slots: (string | null)[] } & PageStyle)[];
+}
+
+/** Les réglages de page présents, sans les clés absentes : le JSON reste net. */
+export function pageStyleOf(page: PageStyle): PageStyle | undefined {
+  const style: PageStyle = {};
+  if (page.paper !== undefined) style.paper = page.paper;
+  if (page.wallpaper !== undefined) style.wallpaper = page.wallpaper;
+  if (page.flow !== undefined && page.flow !== "auto") style.flow = page.flow;
+  return Object.keys(style).length > 0 ? style : undefined;
+}
+
+function isPageStyle(page: PageStyle): boolean {
+  if (page.paper !== undefined && !/^#[0-9a-fA-F]{6}$/.test(page.paper)) return false;
+  if (
+    page.wallpaper !== undefined &&
+    page.wallpaper !== null &&
+    typeof page.wallpaper !== "string"
+  ) {
+    return false;
+  }
+  if (page.flow !== undefined && !PAGE_FLOWS.includes(page.flow)) return false;
+  return true;
 }
 
 /** Nombre maximal de photos sur une même page. Au-delà, plus rien n'est lisible. */
@@ -225,7 +267,8 @@ export function isAlbumLayout(value: unknown): value is AlbumLayout {
       Array.isArray(page.slots) &&
       page.slots.length >= 1 &&
       page.slots.length <= MAX_SLOTS_PER_PAGE &&
-      page.slots.every((slot) => slot === null || typeof slot === "string"),
+      page.slots.every((slot) => slot === null || typeof slot === "string") &&
+      isPageStyle(page),
   );
 }
 
@@ -237,6 +280,9 @@ export function layoutFromPlan(plan: BookPlan, photoIds: string[]): AlbumLayout 
       .map((page, index) => ({
         id: "p" + index + "-" + page.number,
         slots: page.slots.map((slot) => photoIds[slot.photoIndex] ?? null),
+        // Les réglages de page font l'aller-retour : les perdre ici, c'est
+        // les perdre à la première retouche.
+        ...(page.style ?? {}),
       })),
   };
 }
@@ -264,24 +310,32 @@ export function planFromLayout(
   const used = new Set<string>();
   const pages: BookPage[] = [{ kind: "titre", number: 1, slots: [] }];
 
-  const addPage = (ids: (string | null)[]) => {
+  const addPage = (ids: (string | null)[], style?: PageStyle) => {
     const count = Math.max(1, Math.min(MAX_SLOTS_PER_PAGE, ids.length));
-    const bias = portraitMajority(
-      ids.map((id) => (id ? (aspects[indexById.get(id) ?? -1] ?? 0) : 0)).filter((a) => a > 0),
-    );
+    // L'auteur a le dernier mot sur l'orientation ; sinon, les photos décident.
+    const bias =
+      style?.flow === "cote"
+        ? true
+        : style?.flow === "pile"
+          ? false
+          : portraitMajority(
+              ids
+                .map((id) => (id ? (aspects[indexById.get(id) ?? -1] ?? 0) : 0))
+                .filter((a) => a > 0),
+            );
 
     const slots = buildSlots(margin, margin, boxW, boxH, count, bias).map((slot, position) => ({
       ...slot,
       photoIndex: indexById.get(ids[position] ?? "") ?? -1,
     }));
 
-    pages.push({ kind: "photos", number: pages.length + 1, slots });
+    pages.push({ kind: "photos", number: pages.length + 1, slots, ...(style ? { style } : {}) });
   };
 
   for (const page of layout.pages) {
     const ids = page.slots.map((id) => (id && indexById.has(id) ? id : null));
     for (const id of ids) if (id) used.add(id);
-    addPage(ids);
+    addPage(ids, pageStyleOf(page));
   }
 
   const orphans = photoIds.filter((id) => !used.has(id));

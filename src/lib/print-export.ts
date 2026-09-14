@@ -32,7 +32,7 @@ import {
   resolveMotif,
 } from "./cover-templates";
 import { computePlacement, normalizeFraming, printedDpi, type Framing } from "./photo-framing";
-import { wallpaperPrintUrl, type Wallpaper } from "./wallpapers";
+import { findWallpaper, wallpaperPrintUrl, type Wallpaper } from "./wallpapers";
 
 /** Marge extérieure portant les traits de coupe, au-delà du fond perdu. */
 const MARKS_MM = 8;
@@ -418,26 +418,40 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   const body = theme.font === "serif" ? serif : sans;
   const italic = theme.font === "serif" ? serifItalic : sans;
 
-  // Le papier peint des pages est rendu une seule fois, fond perdu compris,
-  // puis posé sur chaque page : un seul JPEG dans le fichier, pas cent.
-  const pageWall = pageWallpaper
-    ? await interior.embedJpg(
-        (
-          await renderSlot(
-            wallpaperPrintUrl(pageWallpaper),
-            format.widthMm + BLEED_MM * 2,
-            format.heightMm + BLEED_MM * 2,
-            normalizeFraming(null),
-            theme.paper,
-          )
-        ).bytes,
-      )
-    : null;
+  // Chaque papier peint est rendu une seule fois, fond perdu compris, puis
+  // posé sur toutes les pages qui l'emploient : un JPEG par papier dans le
+  // fichier, pas un par page.
+  const wallCache = new Map<string, PDFImage>();
+  const wallFor = async (id: string, paper: string): Promise<PDFImage | null> => {
+    const cached = wallCache.get(id);
+    if (cached) return cached;
+    const wallpaper = findWallpaper(id);
+    if (!wallpaper) return null;
+    const rendered = await renderSlot(
+      wallpaperPrintUrl(wallpaper),
+      format.widthMm + BLEED_MM * 2,
+      format.heightMm + BLEED_MM * 2,
+      normalizeFraming(null),
+      paper,
+    );
+    const image = await interior.embedJpg(rendered.bytes);
+    wallCache.set(id, image);
+    return image;
+  };
 
   for (const bookPage of plan.pages) {
     const sheet = addSheet(interior, format.widthMm, format.heightMm);
-    paintBackground(sheet, theme.paper);
-    if (pageWall) paintWallpaper(sheet, pageWall);
+    // Ce que la page décide pour elle-même passe avant le thème et le livre.
+    const paper = bookPage.style?.paper ?? theme.paper;
+    const wallpaperId =
+      bookPage.style?.wallpaper === undefined
+        ? (pageWallpaper?.id ?? null)
+        : bookPage.style.wallpaper;
+    paintBackground(sheet, paper);
+    if (wallpaperId) {
+      const wall = await wallFor(wallpaperId, paper);
+      if (wall) paintWallpaper(sheet, wall);
+    }
     drawCropMarks(sheet);
 
     if (bookPage.kind === "titre") {
@@ -496,7 +510,7 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
         slot.widthMm,
         imageHeight,
         normalizeFraming(photo.framing),
-        theme.paper,
+        paper,
       );
       const image = await interior.embedJpg(rendered.bytes);
       sheet.page.drawImage(image, place(sheet, slot.xMm, slot.yMm, slot.widthMm, imageHeight));

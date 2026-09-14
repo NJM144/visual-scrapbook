@@ -1,10 +1,61 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { BookPages, type ViewerPhoto } from "@/components/BookPages";
-import { MAX_SLOTS_PER_PAGE, type AlbumLayout, type BookPlan } from "@/lib/book-layout";
+import {
+  MAX_SLOTS_PER_PAGE,
+  type AlbumLayout,
+  type BookPlan,
+  type PageFlow,
+  type PageStyle,
+} from "@/lib/book-layout";
 import type { BookTheme } from "@/lib/book-themes";
 import { GHOST_LIFT, GHOST_SIZE, slotKey, useSlotDrag } from "@/lib/use-slot-drag";
-import type { Wallpaper } from "@/lib/wallpapers";
+import { WALLPAPERS, wallpaperScreenUrl, type Wallpaper } from "@/lib/wallpapers";
+
+/** Couleurs de fond proposées à la page ; le thème reste le premier choix. */
+const PAPER_PALETTE: { hex: string; label: string }[] = [
+  { hex: "#FFFFFF", label: "Blanc" },
+  { hex: "#FBF5EC", label: "Crème" },
+  { hex: "#FFF8E7", label: "Ivoire" },
+  { hex: "#F6EFE3", label: "Sable" },
+  { hex: "#E8DCC8", label: "Kraft" },
+  { hex: "#EFE6D8", label: "Lin" },
+  { hex: "#FFF4F2", label: "Rose pâle" },
+  { hex: "#F2F8F7", label: "Lagune" },
+  { hex: "#EEF6EA", label: "Menthe" },
+  { hex: "#EAF2FA", label: "Ciel" },
+  { hex: "#F1ECF7", label: "Lavande" },
+  { hex: "#F4F3EF", label: "Gris perle" },
+  { hex: "#C2A377", label: "Ocre" },
+  { hex: "#1E5B3A", label: "Forêt" },
+  { hex: "#141B33", label: "Nuit" },
+  { hex: "#141414", label: "Encre" },
+];
+
+const FLOWS: { id: PageFlow; label: string }[] = [
+  { id: "auto", label: "Selon les photos" },
+  { id: "cote", label: "Côte à côte" },
+  { id: "pile", label: "L’une sous l’autre" },
+];
+
+/** Une retouche de page : `undefined` retire le réglage, la page hérite de nouveau. */
+interface PageStylePatch {
+  paper?: string | undefined;
+  wallpaper?: string | null | undefined;
+  flow?: PageFlow | undefined;
+}
+
+function mergeStyle(page: AlbumLayout["pages"][number], patch: PageStylePatch) {
+  const { paper, wallpaper, flow, ...rest } = page;
+  const next: PageStyle = {};
+  const nextPaper = "paper" in patch ? patch.paper : paper;
+  const nextWallpaper = "wallpaper" in patch ? patch.wallpaper : wallpaper;
+  const nextFlow = "flow" in patch ? patch.flow : flow;
+  if (nextPaper !== undefined) next.paper = nextPaper;
+  if (nextWallpaper !== undefined) next.wallpaper = nextWallpaper;
+  if (nextFlow !== undefined && nextFlow !== "auto") next.flow = nextFlow;
+  return { ...rest, ...next };
+}
 
 /**
  * Le livre, modifiable à même la page.
@@ -49,6 +100,8 @@ export function BookEditor({
 }) {
   /** Photo dont le panneau d'actions est ouvert. */
   const [openPhoto, setOpenPhoto] = useState<string | null>(null);
+  /** Page dont les réglages sont ouverts : rang parmi les pages de photos, numéro imprimé. */
+  const [openPage, setOpenPage] = useState<{ index: number; number: number } | null>(null);
 
   const photoById = new Map(photos.map((photo) => [photo.id, photo]));
   const urlOf = (id: string | null) => {
@@ -124,9 +177,27 @@ export function BookEditor({
     onLayoutChange({ pages });
   };
 
+  const setPageStyle = (index: number, patch: PageStylePatch) => {
+    onLayoutChange({
+      pages: layout.pages.map((page, i) => (i === index ? mergeStyle(page, patch) : page)),
+    });
+  };
+
+  /** La couleur et le papier peint de cette page, sur toutes les autres. */
+  const applyStyleToAll = (index: number) => {
+    const source = layout.pages[index];
+    if (!source) return;
+    const patch: PageStylePatch = { paper: source.paper, wallpaper: source.wallpaper };
+    onLayoutChange({ pages: layout.pages.map((page) => mergeStyle(page, patch)) });
+  };
+
   const draggedUrl = urlOf(drag.draggedId);
   const selectedUrl = urlOf(drag.selectedId);
   const openUrl = urlOf(openPhoto);
+  const pageOpen = openPage ? layout.pages[openPage.index] : undefined;
+  const pageWallpaperId =
+    pageOpen && pageOpen.wallpaper !== undefined ? pageOpen.wallpaper : wallpaper?.id;
+  const pageWallpaperShown = WALLPAPERS.find((item) => item.id === pageWallpaperId);
 
   return (
     <div
@@ -156,6 +227,7 @@ export function BookEditor({
           onRemovePage: removePage,
           onSlotCount: changeSlotCount,
           maxSlots: MAX_SLOTS_PER_PAGE,
+          onPageStyle: (index, number) => setOpenPage({ index, number }),
         }}
       />
 
@@ -250,6 +322,204 @@ export function BookEditor({
             </button>
 
             {renderPhotoActions(openPhoto, () => setOpenPhoto(null))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Ce qu'une page décide pour elle-même : sa couleur, son papier peint,
+          l'orientation de ses photos. Tout y est réversible : « Thème » et
+          « Comme le livre » rendent la main. */}
+      {openPage && pageOpen ? (
+        <div className="fixed inset-0 z-[65] flex items-end justify-center sm:items-center">
+          <button
+            type="button"
+            aria-label="Fermer"
+            onClick={() => setOpenPage(null)}
+            className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
+          />
+          <div className="relative max-h-[85svh] w-full overflow-y-auto rounded-t-3xl border border-border bg-card p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl sm:max-w-lg sm:rounded-3xl sm:pb-5">
+            <div className="mb-5 flex items-center gap-3">
+              <span
+                aria-hidden
+                className="size-14 shrink-0 overflow-hidden rounded-xl ring-1 ring-black/10"
+                style={{ backgroundColor: pageOpen.paper ?? theme.paper }}
+              >
+                {pageWallpaperShown ? (
+                  <img
+                    src={wallpaperScreenUrl(pageWallpaperShown)}
+                    alt=""
+                    className="size-full object-cover"
+                  />
+                ) : null}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground">Page {openPage.number}</p>
+                <p className="text-xs text-muted-foreground">
+                  Couleur, papier peint et orientation des photos, pour cette page seulement.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpenPage(null)}
+                aria-label="Fermer"
+                className="size-11 shrink-0 rounded-full border border-input text-sm transition-colors hover:bg-muted"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+              Couleur de fond
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPageStyle(openPage.index, { paper: undefined })}
+                title={"Papier du thème (" + theme.paper + ")"}
+                className={
+                  "h-10 rounded-full border px-3 text-xs transition-colors " +
+                  (pageOpen.paper === undefined
+                    ? "border-terre ring-2 ring-terre/40"
+                    : "border-input hover:bg-muted")
+                }
+                style={{ backgroundColor: theme.paper }}
+              >
+                <span className="rounded bg-card/80 px-1.5 py-0.5 text-foreground">Thème</span>
+              </button>
+              {PAPER_PALETTE.map((color) => (
+                <button
+                  key={color.hex}
+                  type="button"
+                  onClick={() => setPageStyle(openPage.index, { paper: color.hex })}
+                  title={color.label}
+                  aria-label={color.label}
+                  className={
+                    "size-10 rounded-full border transition-transform " +
+                    (pageOpen.paper?.toUpperCase() === color.hex
+                      ? "scale-110 border-terre ring-2 ring-terre/40"
+                      : "border-black/10 hover:scale-105")
+                  }
+                  style={{ backgroundColor: color.hex }}
+                />
+              ))}
+              <label className="flex h-10 cursor-pointer items-center gap-2 rounded-full border border-input px-3 text-xs text-foreground transition-colors hover:bg-muted">
+                <input
+                  type="color"
+                  value={pageOpen.paper ?? theme.paper}
+                  onChange={(event) =>
+                    setPageStyle(openPage.index, { paper: event.target.value.toUpperCase() })
+                  }
+                  className="size-6 cursor-pointer rounded border-0 bg-transparent p-0"
+                />
+                Autre couleur
+              </label>
+            </div>
+
+            <p className="mt-6 mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+              Papier peint
+            </p>
+            <div className="-mx-5 flex snap-x gap-3 overflow-x-auto px-5 pb-2">
+              <button
+                type="button"
+                onClick={() => setPageStyle(openPage.index, { wallpaper: undefined })}
+                className={
+                  "w-28 shrink-0 snap-start overflow-hidden rounded-2xl border text-left transition-colors " +
+                  (pageOpen.wallpaper === undefined
+                    ? "border-terre ring-2 ring-terre/40"
+                    : "border-border hover:border-foreground/30")
+                }
+              >
+                {wallpaper ? (
+                  <img
+                    src={wallpaperScreenUrl(wallpaper)}
+                    alt=""
+                    className="h-20 w-full object-cover"
+                  />
+                ) : (
+                  <span className="block h-20 w-full" style={{ backgroundColor: theme.paper }} />
+                )}
+                <span className="block truncate px-2.5 py-2 text-xs font-medium text-foreground">
+                  Comme le livre
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPageStyle(openPage.index, { wallpaper: null })}
+                className={
+                  "w-28 shrink-0 snap-start overflow-hidden rounded-2xl border text-left transition-colors " +
+                  (pageOpen.wallpaper === null
+                    ? "border-terre ring-2 ring-terre/40"
+                    : "border-border hover:border-foreground/30")
+                }
+              >
+                <span
+                  className="block h-20 w-full"
+                  style={{ backgroundColor: pageOpen.paper ?? theme.paper }}
+                />
+                <span className="block truncate px-2.5 py-2 text-xs font-medium text-foreground">
+                  Aucun
+                </span>
+              </button>
+              {WALLPAPERS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setPageStyle(openPage.index, { wallpaper: item.id })}
+                  className={
+                    "w-28 shrink-0 snap-start overflow-hidden rounded-2xl border text-left transition-colors " +
+                    (pageOpen.wallpaper === item.id
+                      ? "border-terre ring-2 ring-terre/40"
+                      : "border-border hover:border-foreground/30")
+                  }
+                >
+                  <img
+                    src={wallpaperScreenUrl(item)}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    className="h-20 w-full object-cover"
+                  />
+                  <span className="block truncate px-2.5 py-2 text-xs font-medium text-foreground">
+                    {item.label}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <p className="mt-6 mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+              Orientation des photos
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {FLOWS.map((flow) => (
+                <button
+                  key={flow.id}
+                  type="button"
+                  onClick={() => setPageStyle(openPage.index, { flow: flow.id })}
+                  className={
+                    "h-10 rounded-full border px-4 text-sm transition-colors " +
+                    ((pageOpen.flow ?? "auto") === flow.id
+                      ? "border-terre bg-terre/10 text-foreground"
+                      : "border-input text-foreground hover:bg-muted")
+                  }
+                >
+                  {flow.label}
+                </button>
+              ))}
+            </div>
+            {pageOpen.slots.length === 1 || pageOpen.slots.length === 4 ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                L’orientation joue pour deux ou trois photos : une seule remplit la page, quatre
+                forment une grille.
+              </p>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => applyStyleToAll(openPage.index)}
+              className="mt-6 h-11 w-full rounded-full border border-input px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              Appliquer la couleur et le papier peint à toutes les pages
+            </button>
           </div>
         </div>
       ) : null}
