@@ -1,5 +1,6 @@
 import type { BookTheme } from "@/lib/book-themes";
 import type { PrintFormat } from "@/lib/print-formats";
+import { wallpaperScreenUrl, type Wallpaper } from "@/lib/wallpapers";
 import {
   TILE_COLUMNS,
   findCoverTemplate,
@@ -23,6 +24,7 @@ export function CoverPreview({
   subtitle,
   photoUrl,
   templateId,
+  wallpaper,
   compact = false,
 }: {
   theme: BookTheme;
@@ -31,6 +33,8 @@ export function CoverPreview({
   subtitle: string;
   photoUrl?: string | undefined;
   templateId?: string | undefined;
+  /** Papier peint sous la composition ; absent, le fond uni du thème. */
+  wallpaper?: Wallpaper | null | undefined;
   /** Dans un sélecteur, la légende sous la vignette n'est que du bruit. */
   compact?: boolean;
 }) {
@@ -51,6 +55,18 @@ export function CoverPreview({
           containerType: "inline-size",
         }}
       >
+        {/* Le papier peint passe sous tout le reste, photo pleine page
+            comprise : c'est le voile coloré qui l'accorde au thème. */}
+        {wallpaper ? (
+          <img
+            src={wallpaperScreenUrl(wallpaper)}
+            alt=""
+            aria-hidden
+            draggable={false}
+            className="absolute inset-0 -z-20 size-full object-cover"
+          />
+        ) : null}
+
         {/* Rainure de pliure, côté dos. */}
         <span
           aria-hidden

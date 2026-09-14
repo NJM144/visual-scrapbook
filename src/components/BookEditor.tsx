@@ -4,6 +4,7 @@ import { BookPages, type ViewerPhoto } from "@/components/BookPages";
 import { MAX_SLOTS_PER_PAGE, type AlbumLayout, type BookPlan } from "@/lib/book-layout";
 import type { BookTheme } from "@/lib/book-themes";
 import { GHOST_LIFT, GHOST_SIZE, slotKey, useSlotDrag } from "@/lib/use-slot-drag";
+import type { Wallpaper } from "@/lib/wallpapers";
 
 /**
  * Le livre, modifiable à même la page.
@@ -30,6 +31,7 @@ export function BookEditor({
   renderPhotoActions,
   dpiByIndex,
   minDpi,
+  wallpaper,
 }: {
   plan: BookPlan;
   /** Disposition correspondant au plan affiché, page pour page. */
@@ -43,6 +45,7 @@ export function BookEditor({
   renderPhotoActions: (photoId: string, close: () => void) => ReactNode;
   dpiByIndex?: ReadonlyMap<number, number> | undefined;
   minDpi?: number | undefined;
+  wallpaper?: Wallpaper | null | undefined;
 }) {
   /** Photo dont le panneau d'actions est ouvert. */
   const [openPhoto, setOpenPhoto] = useState<string | null>(null);
@@ -142,6 +145,7 @@ export function BookEditor({
         dateLabel={dateLabel}
         dpiByIndex={dpiByIndex}
         minDpi={minDpi}
+        wallpaper={wallpaper}
         edit={{
           onSlotPointerDown: drag.handlePointerDown,
           hoverKey: drag.hoverKey,

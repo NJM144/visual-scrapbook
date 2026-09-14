@@ -2,6 +2,7 @@ import { BOOK_THEMES, findTheme } from "@/lib/book-themes";
 import { PRINT_FORMATS, findFormat } from "@/lib/print-formats";
 import { COVER_TEMPLATES } from "@/lib/cover-templates";
 import { CoverPreview } from "@/components/CoverPreview";
+import { WALLPAPERS, findWallpaper, wallpaperScreenUrl } from "@/lib/wallpapers";
 
 /**
  * Coffret et thème : ce que l'on choisit avant tout le reste.
@@ -18,6 +19,10 @@ export function BookStylePicker({
   onFormatChange,
   onCoverTemplateChange,
   onThemeChange,
+  coverWallpaperId,
+  pageWallpaperId,
+  onCoverWallpaperChange,
+  onPageWallpaperChange,
   title,
   photoUrl,
   withPreview = false,
@@ -28,6 +33,11 @@ export function BookStylePicker({
   onFormatChange: (id: string) => void;
   onCoverTemplateChange: (id: string) => void;
   onThemeChange: (id: string) => void;
+  /** Papiers peints ; `null` = fond uni du thème. */
+  coverWallpaperId: string | null;
+  pageWallpaperId: string | null;
+  onCoverWallpaperChange: (id: string | null) => void;
+  onPageWallpaperChange: (id: string | null) => void;
   /** Titre affiché sur les maquettes de couverture. */
   title: string;
   photoUrl?: string | undefined;
@@ -36,6 +46,7 @@ export function BookStylePicker({
 }) {
   const theme = findTheme(themeId);
   const format = findFormat(formatId);
+  const coverWallpaper = findWallpaper(coverWallpaperId);
 
   // min-w-0 : posé dans une colonne de grille, ce bloc prendrait sinon la
   // largeur de ses rangées défilantes (sept couvertures côte à côte) et la
@@ -101,6 +112,7 @@ export function BookStylePicker({
                   subtitle=""
                   photoUrl={photoUrl}
                   templateId={option.id}
+                  wallpaper={coverWallpaper}
                   compact
                 />
               </span>
@@ -147,6 +159,35 @@ export function BookStylePicker({
           ))}
         </div>
       </section>
+
+      <section>
+        <h3 className="mb-1 font-serif text-2xl text-foreground">Le papier peint</h3>
+        <p className="mb-5 text-sm text-muted-foreground">
+          Un fond illustré sous la couverture, un autre sous les pages — ou aucun, et c’est le
+          papier uni du thème. Les cadres laissent le centre libre ; les motifs passent derrière les
+          photos.
+        </p>
+        <WallpaperStrip
+          label="Couverture"
+          selected={coverWallpaperId}
+          onChange={onCoverWallpaperChange}
+          plain={theme.coverBackground}
+        />
+        {coverWallpaperId && coverTemplateId === "photo_pleine" ? (
+          <p className="-mt-1 mb-4 text-xs leading-relaxed text-muted-foreground">
+            Avec la couverture « Photo pleine page », la photo recouvre le papier peint : choisissez
+            « Photo encadrée », « Encart », « Icône », « Bandeau » ou « Typographique » pour le
+            voir.
+          </p>
+        ) : null}
+        <WallpaperStrip
+          label="Pages"
+          selected={pageWallpaperId}
+          onChange={onPageWallpaperChange}
+          plain={theme.paper}
+          className="mt-6"
+        />
+      </section>
     </div>
   );
 
@@ -166,9 +207,64 @@ export function BookStylePicker({
             subtitle=""
             photoUrl={photoUrl}
             templateId={coverTemplateId}
+            wallpaper={coverWallpaper}
           />
         </div>
       </aside>
+    </div>
+  );
+}
+
+/** Une rangée de papiers peints, « Aucun » en tête. Défile de côté partout : trente fonds en grille feraient un mur. */
+function WallpaperStrip({
+  label,
+  selected,
+  onChange,
+  plain,
+  className = "",
+}: {
+  label: string;
+  selected: string | null;
+  onChange: (id: string | null) => void;
+  /** Couleur du fond uni, pour la tuile « Aucun ». */
+  plain: string;
+  className?: string;
+}) {
+  const tile = (active: boolean) =>
+    "w-32 shrink-0 snap-start overflow-hidden rounded-2xl border text-left transition-colors " +
+    (active ? "border-terre ring-2 ring-terre/40" : "border-border hover:border-foreground/30");
+
+  return (
+    <div className={className}>
+      <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+        {label}
+      </p>
+      <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0">
+        <button type="button" onClick={() => onChange(null)} className={tile(selected === null)}>
+          <span className="block h-24 w-full" style={{ backgroundColor: plain }} />
+          <span className="block px-3 py-2 text-sm font-medium text-foreground">Aucun</span>
+        </button>
+        {WALLPAPERS.map((wallpaper) => (
+          <button
+            key={wallpaper.id}
+            type="button"
+            onClick={() => onChange(wallpaper.id)}
+            title={wallpaper.kind === "cadre" ? "Cadre" : "Motif"}
+            className={tile(selected === wallpaper.id)}
+          >
+            <img
+              src={wallpaperScreenUrl(wallpaper)}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              className="h-24 w-full object-cover"
+            />
+            <span className="block truncate px-3 py-2 text-sm font-medium text-foreground">
+              {wallpaper.label}
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

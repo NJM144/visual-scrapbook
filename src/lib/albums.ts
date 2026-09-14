@@ -16,6 +16,9 @@ export interface Album {
   cover_photo_id: string | null;
   /** Composition de la couverture (voir cover-templates.ts). */
   cover_template: string;
+  /** Papiers peints (voir wallpapers.ts) ; `null` = fond uni du thème. */
+  cover_wallpaper: string | null;
+  page_wallpaper: string | null;
   /**
    * Disposition manuelle des pages ; `null` = découpage automatique.
    * Typée explicitement plutôt qu'en `unknown` : les valeurs traversant une

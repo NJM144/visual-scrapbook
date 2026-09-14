@@ -18,6 +18,7 @@ import {
 } from "@/lib/albums.functions";
 import { findTheme } from "@/lib/book-themes";
 import { findFormat, spineWidthMm, effectiveDpi, MIN_PRINT_DPI } from "@/lib/print-formats";
+import { findWallpaper } from "@/lib/wallpapers";
 import {
   layoutFromPlan,
   planBook,
@@ -134,6 +135,9 @@ function BookStudio() {
   const [coverSubtitle, setCoverSubtitle] = useState("");
   const [coverPhotoId, setCoverPhotoId] = useState<string | null>(null);
   const [coverTemplateId, setCoverTemplateId] = useState("photo_pleine");
+  /** Papiers peints ; `null` = fond uni du thème. */
+  const [coverWallpaperId, setCoverWallpaperId] = useState<string | null>(null);
+  const [pageWallpaperId, setPageWallpaperId] = useState<string | null>(null);
 
   /** Ordre en cours d'édition, pas encore enregistré. */
   const [order, setOrder] = useState<string[]>([]);
@@ -168,6 +172,8 @@ function BookStudio() {
     setCoverSubtitle(album.cover_subtitle ?? "");
     setCoverPhotoId(album.cover_photo_id);
     setCoverTemplateId(album.cover_template);
+    setCoverWallpaperId(album.cover_wallpaper ?? null);
+    setPageWallpaperId(album.page_wallpaper ?? null);
     setLayout(album.layout);
     setLayoutDirty(false);
   }, [album]);
@@ -419,6 +425,8 @@ function BookStudio() {
   };
 
   const coverPhoto = photos.find((photo) => photo.id === coverPhotoId) ?? photos[0];
+  const coverWallpaper = findWallpaper(coverWallpaperId);
+  const pageWallpaper = findWallpaper(pageWallpaperId);
   const coverDpi = effectiveDpi(2048, format.widthMm);
   const title = coverTitle.trim() || album?.title || "Album";
   const dateLabel = new Date(album?.created_at ?? Date.now()).toLocaleDateString("fr-FR", {
@@ -651,6 +659,8 @@ function BookStudio() {
           theme: themeId,
           pageFormat: formatId,
           coverTemplate: coverTemplateId,
+          coverWallpaper: coverWallpaperId,
+          pageWallpaper: pageWallpaperId,
           coverTitle: coverTitle.trim() || null,
           coverSubtitle: coverSubtitle.trim() || null,
           coverPhotoId,
@@ -731,6 +741,8 @@ function BookStudio() {
           ? { id: coverPhoto.id, url: coverPhoto.printUrl as string }
           : undefined,
         coverTemplate: coverTemplateId,
+        coverWallpaper,
+        pageWallpaper,
         meta: { title, subtitle: coverSubtitle.trim(), dateLabel },
         onProgress: (done, total, label) => setProgress({ done, total, label }),
       });
@@ -838,6 +850,7 @@ function BookStudio() {
                 subtitle={coverSubtitle}
                 photoUrl={coverPhoto?.signedUrl}
                 templateId={coverTemplateId}
+                wallpaper={coverWallpaper}
               />
             </div>
 
@@ -939,6 +952,7 @@ function BookStudio() {
                     renderPhotoActions={renderPhotoActions}
                     dpiByIndex={dpiByIndex}
                     minDpi={MIN_PRINT_DPI}
+                    wallpaper={pageWallpaper}
                   />
                 ) : (
                   <BookPages
@@ -950,6 +964,7 @@ function BookStudio() {
                     dateLabel={dateLabel}
                     dpiByIndex={dpiByIndex}
                     minDpi={MIN_PRINT_DPI}
+                    wallpaper={pageWallpaper}
                   />
                 )}
 
@@ -982,6 +997,10 @@ function BookStudio() {
                 onFormatChange={setFormatId}
                 onCoverTemplateChange={setCoverTemplateId}
                 onThemeChange={setThemeId}
+                coverWallpaperId={coverWallpaperId}
+                pageWallpaperId={pageWallpaperId}
+                onCoverWallpaperChange={setCoverWallpaperId}
+                onPageWallpaperChange={setPageWallpaperId}
                 title={title}
                 photoUrl={coverPhoto?.signedUrl}
               />
@@ -1140,6 +1159,7 @@ function BookStudio() {
                 subtitle={coverSubtitle}
                 photoUrl={coverPhoto?.signedUrl}
                 templateId={coverTemplateId}
+                wallpaper={coverWallpaper}
               />
 
               <dl className="rounded-2xl border border-border bg-card p-5 text-sm">

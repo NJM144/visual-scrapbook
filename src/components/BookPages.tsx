@@ -2,6 +2,7 @@ import type { BookPlan } from "@/lib/book-layout";
 import type { BookTheme } from "@/lib/book-themes";
 import type { Framing } from "@/lib/photo-framing";
 import { slotKey, type SlotPosition } from "@/lib/use-slot-drag";
+import { wallpaperScreenUrl, type Wallpaper } from "@/lib/wallpapers";
 
 /**
  * Le livre tel qu'il s'imprimera, page après page — et l'endroit où on le
@@ -58,6 +59,7 @@ export function BookPages({
   edit,
   dpiByIndex,
   minDpi,
+  wallpaper,
 }: {
   plan: BookPlan;
   theme: BookTheme;
@@ -73,6 +75,8 @@ export function BookPages({
    */
   dpiByIndex?: ReadonlyMap<number, number> | undefined;
   minDpi?: number | undefined;
+  /** Papier peint sous toutes les pages ; absent, le papier uni du thème. */
+  wallpaper?: Wallpaper | null | undefined;
 }) {
   const { format } = plan;
 
@@ -110,6 +114,19 @@ export function BookPages({
                 fontFamily: theme.font === "serif" ? "var(--font-serif)" : "var(--font-sans)",
               }}
             >
+              {/* Le papier peint d'abord : tout ce qui suit se pose dessus. */}
+              {wallpaper ? (
+                <img
+                  src={wallpaperScreenUrl(wallpaper)}
+                  alt=""
+                  aria-hidden
+                  draggable={false}
+                  loading="lazy"
+                  decoding="async"
+                  className="pointer-events-none absolute inset-0 size-full object-cover"
+                />
+              ) : null}
+
               {page.kind === "titre" ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center px-[10%] text-center">
                   <span className="text-balance text-[clamp(0.9rem,3.4cqw,1.4rem)] leading-tight">

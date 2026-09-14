@@ -234,6 +234,8 @@ export const createAlbum = createServerFn({ method: "POST" })
         theme: z.string().min(1).max(40).optional(),
         pageFormat: z.string().min(1).max(40).optional(),
         coverTemplate: z.string().min(1).max(40).optional(),
+        coverWallpaper: z.string().min(1).max(60).nullable().optional(),
+        pageWallpaper: z.string().min(1).max(60).nullable().optional(),
       })
       .parse(data),
   )
@@ -247,6 +249,8 @@ export const createAlbum = createServerFn({ method: "POST" })
         ...(data.theme ? { theme: data.theme } : {}),
         ...(data.pageFormat ? { page_format: data.pageFormat } : {}),
         ...(data.coverTemplate ? { cover_template: data.coverTemplate } : {}),
+        ...(data.coverWallpaper ? { cover_wallpaper: data.coverWallpaper } : {}),
+        ...(data.pageWallpaper ? { page_wallpaper: data.pageWallpaper } : {}),
       })
       .select()
       .single();
@@ -445,6 +449,8 @@ export const updateAlbumBook = createServerFn({ method: "POST" })
         theme: z.string().min(1).max(40),
         pageFormat: z.string().min(1).max(40),
         coverTemplate: z.string().min(1).max(40),
+        coverWallpaper: z.string().min(1).max(60).nullable().optional(),
+        pageWallpaper: z.string().min(1).max(60).nullable().optional(),
         coverTitle: z.string().max(120).nullable().optional(),
         coverSubtitle: z.string().max(160).nullable().optional(),
         coverPhotoId: z.string().uuid().nullable().optional(),
@@ -458,6 +464,8 @@ export const updateAlbumBook = createServerFn({ method: "POST" })
         theme: data.theme,
         page_format: data.pageFormat,
         cover_template: data.coverTemplate,
+        cover_wallpaper: data.coverWallpaper ?? null,
+        page_wallpaper: data.pageWallpaper ?? null,
         cover_title: data.coverTitle ?? null,
         cover_subtitle: data.coverSubtitle ?? null,
         cover_photo_id: data.coverPhotoId ?? null,

@@ -12,7 +12,14 @@
  * ne fait que gonfler le fichier.
  */
 
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import {
+  PDFDocument,
+  StandardFonts,
+  rgb,
+  type PDFFont,
+  type PDFPage,
+  type PDFImage,
+} from "pdf-lib";
 import { strToU8, zipSync } from "fflate";
 import { BLEED_MM, MIN_PRINT_DPI, mmToPt, mmToPx, spineWidthMm } from "./print-formats";
 import { hexToRgb01, type BookTheme } from "./book-themes";
@@ -25,6 +32,7 @@ import {
   resolveMotif,
 } from "./cover-templates";
 import { computePlacement, normalizeFraming, printedDpi, type Framing } from "./photo-framing";
+import { wallpaperPrintUrl, type Wallpaper } from "./wallpapers";
 
 /** Marge extérieure portant les traits de coupe, au-delà du fond perdu. */
 const MARKS_MM = 8;
@@ -186,6 +194,22 @@ function paintBackground(sheet: Sheet, hex: string) {
     width: sheet.trimWidthPt + bleed * 2,
     height: sheet.trimHeightPt + bleed * 2,
     color: color(hex),
+  });
+}
+
+/**
+ * Pose un papier peint sur la zone rognée et son fond perdu.
+ *
+ * L'image a été rendue exactement à ce rapport par `renderSlot` : elle se
+ * pose sans déformation ni débordement sur les traits de coupe.
+ */
+function paintWallpaper(sheet: Sheet, image: PDFImage) {
+  const bleed = mmToPt(BLEED_MM);
+  sheet.page.drawImage(image, {
+    x: sheet.offsetPt - bleed,
+    y: sheet.heightPt - sheet.offsetPt - sheet.trimHeightPt - bleed,
+    width: sheet.trimWidthPt + bleed * 2,
+    height: sheet.trimHeightPt + bleed * 2,
   });
 }
 
@@ -354,11 +378,24 @@ export interface ExportOptions {
   coverPhoto?: ExportPhoto | undefined;
   /** Modèle de couverture ; « photo pleine page » par défaut. */
   coverTemplate?: string | undefined;
+  /** Papiers peints ; absents, les fonds unis du thème. */
+  coverWallpaper?: Wallpaper | null | undefined;
+  pageWallpaper?: Wallpaper | null | undefined;
   onProgress?: (done: number, total: number, label: string) => void;
 }
 
 export async function exportBook(options: ExportOptions): Promise<ExportResult> {
-  const { plan, theme, photos, meta, coverPhoto, coverTemplate, onProgress } = options;
+  const {
+    plan,
+    theme,
+    photos,
+    meta,
+    coverPhoto,
+    coverTemplate,
+    coverWallpaper,
+    pageWallpaper,
+    onProgress,
+  } = options;
   const format = plan.format;
   const warnings: string[] = [];
 
@@ -381,9 +418,26 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   const body = theme.font === "serif" ? serif : sans;
   const italic = theme.font === "serif" ? serifItalic : sans;
 
+  // Le papier peint des pages est rendu une seule fois, fond perdu compris,
+  // puis posé sur chaque page : un seul JPEG dans le fichier, pas cent.
+  const pageWall = pageWallpaper
+    ? await interior.embedJpg(
+        (
+          await renderSlot(
+            wallpaperPrintUrl(pageWallpaper),
+            format.widthMm + BLEED_MM * 2,
+            format.heightMm + BLEED_MM * 2,
+            normalizeFraming(null),
+            theme.paper,
+          )
+        ).bytes,
+      )
+    : null;
+
   for (const bookPage of plan.pages) {
     const sheet = addSheet(interior, format.widthMm, format.heightMm);
     paintBackground(sheet, theme.paper);
+    if (pageWall) paintWallpaper(sheet, pageWall);
     drawCropMarks(sheet);
 
     if (bookPage.kind === "titre") {
@@ -517,6 +571,17 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
 
   const sheet = addSheet(cover, coverWidth, format.heightMm);
   paintBackground(sheet, theme.coverBackground);
+  if (coverWallpaper) {
+    // D'un seul tenant sur les deux plats et le dos, comme une toile.
+    const rendered = await renderSlot(
+      wallpaperPrintUrl(coverWallpaper),
+      coverWidth + BLEED_MM * 2,
+      format.heightMm + BLEED_MM * 2,
+      normalizeFraming(null),
+      theme.coverBackground,
+    );
+    paintWallpaper(sheet, await cover.embedJpg(rendered.bytes));
+  }
   drawCropMarks(sheet);
 
   // Le plat recto occupe la moitié droite : dos au centre, dos de couverture à

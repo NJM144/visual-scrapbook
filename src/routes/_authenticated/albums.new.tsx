@@ -9,6 +9,7 @@ import { CoverPreview } from "@/components/CoverPreview";
 import { DEFAULT_THEME_ID, findTheme } from "@/lib/book-themes";
 import { DEFAULT_FORMAT_ID, findFormat } from "@/lib/print-formats";
 import { DEFAULT_COVER_TEMPLATE, findCoverTemplate } from "@/lib/cover-templates";
+import { findWallpaper } from "@/lib/wallpapers";
 
 export const Route = createFileRoute("/_authenticated/albums/new")({
   head: () => ({
@@ -35,6 +36,8 @@ function NewAlbumPage() {
   const [formatId, setFormatId] = useState(DEFAULT_FORMAT_ID);
   const [coverTemplateId, setCoverTemplateId] = useState(DEFAULT_COVER_TEMPLATE);
   const [themeId, setThemeId] = useState(DEFAULT_THEME_ID);
+  const [coverWallpaperId, setCoverWallpaperId] = useState<string | null>(null);
+  const [pageWallpaperId, setPageWallpaperId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,6 +56,8 @@ function NewAlbumPage() {
           theme: themeId,
           pageFormat: formatId,
           coverTemplate: coverTemplateId,
+          coverWallpaper: coverWallpaperId,
+          pageWallpaper: pageWallpaperId,
         },
       });
       await queryClient.invalidateQueries({ queryKey: ["albums"] });
@@ -97,6 +102,10 @@ function NewAlbumPage() {
               onFormatChange={setFormatId}
               onCoverTemplateChange={setCoverTemplateId}
               onThemeChange={setThemeId}
+              coverWallpaperId={coverWallpaperId}
+              pageWallpaperId={pageWallpaperId}
+              onCoverWallpaperChange={setCoverWallpaperId}
+              onPageWallpaperChange={setPageWallpaperId}
               title={title.trim() || "Mon album"}
               withPreview
             />
@@ -137,6 +146,7 @@ function NewAlbumPage() {
                   title={title.trim() || "Mon album"}
                   subtitle=""
                   templateId={coverTemplateId}
+                  wallpaper={findWallpaper(coverWallpaperId)}
                   compact
                 />
               </div>

@@ -64,6 +64,8 @@ function ImportPage() {
   const [formatId, setFormatId] = useState(DEFAULT_FORMAT_ID);
   const [coverTemplateId, setCoverTemplateId] = useState(DEFAULT_COVER_TEMPLATE);
   const [themeId, setThemeId] = useState(DEFAULT_THEME_ID);
+  const [coverWallpaperId, setCoverWallpaperId] = useState<string | null>(null);
+  const [pageWallpaperId, setPageWallpaperId] = useState<string | null>(null);
   const [photos, setPhotos] = useState<DatedPhoto[]>([]);
   const [analyzed, setAnalyzed] = useState(0);
   const [totalToAnalyze, setTotalToAnalyze] = useState(0);
@@ -202,6 +204,8 @@ function ImportPage() {
             theme: themeId,
             pageFormat: formatId,
             coverTemplate: coverTemplateId,
+            coverWallpaper: coverWallpaperId,
+            pageWallpaper: pageWallpaperId,
           },
         });
 
@@ -297,6 +301,10 @@ function ImportPage() {
               onFormatChange={setFormatId}
               onCoverTemplateChange={setCoverTemplateId}
               onThemeChange={setThemeId}
+              coverWallpaperId={coverWallpaperId}
+              pageWallpaperId={pageWallpaperId}
+              onCoverWallpaperChange={setCoverWallpaperId}
+              onPageWallpaperChange={setPageWallpaperId}
               title="Mon album"
               withPreview
             />
