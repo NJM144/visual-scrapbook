@@ -66,7 +66,9 @@ function NewAlbumPage() {
   };
 
   return (
-    <div className="px-6 py-16">
+    // Sur téléphone, le bouton « Continuer » est collé en bas de l'écran : la
+    // page réserve la place pour qu'il ne masque pas le dernier choix.
+    <div className="px-4 pb-32 pt-8 sm:px-6 sm:py-16">
       <div className={"mx-auto " + (step === "style" ? "max-w-6xl" : "max-w-xl")}>
         <Link
           to="/albums"
@@ -74,20 +76,20 @@ function NewAlbumPage() {
         >
           ← Mes albums
         </Link>
-        <p className="mt-6 text-sm font-semibold uppercase tracking-[0.18em] text-terre">
+        <p className="mt-4 text-sm font-semibold uppercase tracking-[0.18em] text-terre sm:mt-6">
           Étape {step === "style" ? "1" : "2"} sur 2
         </p>
-        <h1 className="mt-2 font-serif text-4xl text-foreground">
+        <h1 className="mt-2 font-serif text-3xl text-foreground sm:text-4xl">
           {step === "style" ? "Choisissez le coffret et le thème" : "Nommez votre album"}
         </h1>
-        <p className="mt-3 text-sm text-muted-foreground">
+        <p className="mt-2 text-sm text-muted-foreground sm:mt-3">
           {step === "style"
             ? "Ils décident de la mise en page : on les fixe avant d’ajouter les photos. Vous pourrez encore en changer plus tard."
             : "Vous ajouterez vos photos juste après."}
         </p>
 
         {step === "style" ? (
-          <div className="mt-10">
+          <div className="mt-6 sm:mt-10">
             <BookStylePicker
               formatId={formatId}
               coverTemplateId={coverTemplateId}
@@ -98,16 +100,30 @@ function NewAlbumPage() {
               title={title.trim() || "Mon album"}
               withPreview
             />
-            <div className="mt-10 flex justify-end">
+            <div className="mt-10 hidden justify-end sm:flex">
               <button
                 type="button"
                 onClick={() => {
                   setStep("details");
                   window.scrollTo({ top: 0 });
                 }}
-                className="w-full rounded-full bg-terre px-6 py-3.5 text-sm font-medium text-white transition-colors hover:bg-terre/90 sm:w-auto"
+                className="rounded-full bg-terre px-6 py-3.5 text-sm font-medium text-white transition-colors hover:bg-terre/90"
               >
                 Continuer →
+              </button>
+            </div>
+
+            {/* Sous le pouce, quelle que soit la hauteur de la page. */}
+            <div className="above-mobile-nav fixed inset-x-3 z-40 flex rounded-full border border-border bg-card/95 p-1.5 shadow-lg backdrop-blur sm:hidden">
+              <button
+                type="button"
+                onClick={() => {
+                  setStep("details");
+                  window.scrollTo({ top: 0 });
+                }}
+                className="flex-1 rounded-full bg-terre px-4 py-3 text-sm font-medium text-white"
+              >
+                Continuer : nommer l’album →
               </button>
             </div>
           </div>

@@ -972,7 +972,9 @@ function BookStudio() {
 
         {tab === "apparence" ? (
           <div className="grid gap-10 lg:grid-cols-[1fr_20rem]">
-            <div className="space-y-10">
+            {/* min-w-0 : sans lui, la colonne suit la largeur des rangées
+                défilantes du sélecteur et la page déborde du téléphone. */}
+            <div className="min-w-0 space-y-10">
               <BookStylePicker
                 formatId={formatId}
                 coverTemplateId={coverTemplateId}

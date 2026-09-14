@@ -37,8 +37,11 @@ export function BookStylePicker({
   const theme = findTheme(themeId);
   const format = findFormat(formatId);
 
+  // min-w-0 : posé dans une colonne de grille, ce bloc prendrait sinon la
+  // largeur de ses rangées défilantes (sept couvertures côte à côte) et la
+  // page entière déborderait de l'écran du téléphone.
   const choices = (
-    <div className="space-y-10">
+    <div className="min-w-0 space-y-10">
       <section>
         <h3 className="mb-1 font-serif text-2xl text-foreground">Le coffret</h3>
         <p className="mb-5 text-sm text-muted-foreground">
@@ -152,8 +155,10 @@ export function BookStylePicker({
   return (
     <div className="grid gap-10 lg:grid-cols-[1fr_18rem]">
       {choices}
+      {/* Sur téléphone, la couverture reste un repère, pas un écran entier :
+          les choix doivent arriver sans faire défiler. */}
       <aside className="order-first lg:order-none lg:sticky lg:top-24 lg:self-start">
-        <div className="mx-auto max-w-[14rem] lg:max-w-none">
+        <div className="mx-auto max-w-[8.5rem] sm:max-w-[14rem] lg:max-w-none">
           <CoverPreview
             theme={theme}
             format={format}

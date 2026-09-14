@@ -229,8 +229,19 @@ function ImportPage() {
     }
   };
 
+  const continueFromStyle = () => {
+    if (photos.length > 0) {
+      setStep("review");
+      return;
+    }
+    setStep("select");
+    inputRef.current?.click();
+  };
+
   return (
-    <div className="px-6 py-12 md:py-16">
+    // Sur téléphone, l'action du moment est collée en bas de l'écran : la page
+    // réserve la place pour qu'elle ne masque pas le dernier choix.
+    <div className="px-4 pb-32 pt-8 sm:px-6 sm:py-12 md:py-16">
       <div className="mx-auto max-w-5xl">
         <Link
           to="/albums"
@@ -239,14 +250,21 @@ function ImportPage() {
           ← Mes albums
         </Link>
 
-        <header className="mt-6 mb-10">
+        <header className="mt-4 mb-6 sm:mt-6 sm:mb-10">
           <h2 className="mb-2 text-sm font-medium uppercase tracking-widest text-accent">
             Import automatique
           </h2>
-          <h1 className="font-serif text-4xl text-foreground md:text-5xl">
+          <h1 className="font-serif text-3xl text-foreground sm:text-4xl md:text-5xl">
             Vos photos se rangent toutes seules
           </h1>
-          <p className="mt-4 max-w-[60ch] leading-relaxed text-foreground/70">
+          {/* Une fois les photos choisies, l'explication a fait son office :
+              sur téléphone, elle laisse la place au découpage. */}
+          <p
+            className={
+              "mt-3 max-w-[60ch] text-sm leading-relaxed text-foreground/70 sm:mt-4 sm:text-base " +
+              (step === "style" || step === "select" ? "" : "hidden sm:block")
+            }
+          >
             Choisissez des photos dans la galerie de votre téléphone. Leur date de prise de vue
             suffit à retrouver vos fêtes et vos réunions de famille — un album pour chacun, sans
             rien saisir.
@@ -264,10 +282,13 @@ function ImportPage() {
 
         {step === "style" ? (
           <div>
-            <p className="mb-8 max-w-[62ch] text-sm leading-relaxed text-muted-foreground">
-              Commencez par le coffret et le thème : chaque album créé les recevra. Ils décident de
-              la mise en page, c’est pourquoi on les fixe avant les photos — vous pourrez encore les
-              changer album par album.
+            <p className="mb-5 max-w-[62ch] text-sm leading-relaxed text-muted-foreground sm:mb-8">
+              D’abord le coffret et le thème : chaque album créé les recevra.
+              <span className="hidden sm:inline">
+                {" "}
+                Ils décident de la mise en page, c’est pourquoi on les fixe avant les photos — vous
+                pourrez encore les changer album par album.
+              </span>
             </p>
             <BookStylePicker
               formatId={formatId}
@@ -279,18 +300,22 @@ function ImportPage() {
               title="Mon album"
               withPreview
             />
-            <div className="mt-10 flex justify-end">
+            <div className="mt-10 hidden justify-end sm:flex">
               <button
                 type="button"
-                onClick={() => {
-                  if (photos.length > 0) {
-                    setStep("review");
-                    return;
-                  }
-                  setStep("select");
-                  inputRef.current?.click();
-                }}
-                className="inline-flex w-full items-center justify-center rounded-full bg-primary px-8 py-4 text-base font-medium text-primary-foreground transition-colors hover:bg-primary/90 sm:w-auto"
+                onClick={continueFromStyle}
+                className="inline-flex items-center justify-center rounded-full bg-primary px-8 py-4 text-base font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                {photos.length > 0 ? "Revenir au découpage" : "Continuer : choisir mes photos"}
+              </button>
+            </div>
+
+            {/* Sous le pouce, quelle que soit la hauteur de la page. */}
+            <div className="above-mobile-nav fixed inset-x-3 z-40 flex rounded-full border border-border bg-card/95 p-1.5 shadow-lg backdrop-blur sm:hidden">
+              <button
+                type="button"
+                onClick={continueFromStyle}
+                className="flex-1 rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground"
               >
                 {photos.length > 0 ? "Revenir au découpage" : "Continuer : choisir mes photos"}
               </button>
