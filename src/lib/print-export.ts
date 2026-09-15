@@ -33,6 +33,13 @@ import {
 } from "./cover-templates";
 import { applyEffectToImageData, effectFilter, effectMatrix } from "./photo-effects";
 import { computePlacement, normalizeFraming, printedDpi, type Framing } from "./photo-framing";
+import {
+  LINE_HEIGHT,
+  TEXT_PADDING_MM,
+  findTextSize,
+  wrapText,
+  type TextBlock,
+} from "./text-blocks";
 import { findWallpaper, wallpaperPrintUrl, type Wallpaper } from "./wallpapers";
 
 /** Marge extérieure portant les traits de coupe, au-delà du fond perdu. */
@@ -355,6 +362,83 @@ function drawCentered(
   sheet.page.drawText(text, { x: p.x, y: p.y, size: sizePt, font, color: color(hex) });
 }
 
+/**
+ * Retire les caractères que la police ne sait pas coder.
+ *
+ * Les polices standard du PDF couvrent le latin occidental. Un emoji collé
+ * dans un paragraphe ferait échouer `drawText` — et donc tout l'export — pour
+ * un signe décoratif : mieux vaut l'omettre et livrer le livre.
+ */
+const encodable = new Map<string, boolean>();
+function safeText(text: string, font: PDFFont): string {
+  let out = "";
+  for (const char of text) {
+    const cached = encodable.get(char);
+    if (cached === false) continue;
+    if (cached === true) {
+      out += char;
+      continue;
+    }
+    try {
+      font.widthOfTextAtSize(char, 10);
+      encodable.set(char, true);
+      out += char;
+    } catch {
+      encodable.set(char, false);
+    }
+  }
+  return out;
+}
+
+/**
+ * Trace un paragraphe dans sa case.
+ *
+ * Le texte est coupé en lignes à la largeur de la case, puis centré
+ * verticalement : une case n'est pas une colonne de journal, un bloc de deux
+ * lignes collé en haut d'un grand cadre aurait l'air tombé là par accident.
+ * Les lignes qui ne tiennent pas ne sont pas imprimées — l'auteur en est
+ * averti dans la fiche technique.
+ */
+function drawTextBlock(
+  sheet: Sheet,
+  slot: { xMm: number; yMm: number; widthMm: number; heightMm: number },
+  block: TextBlock,
+  font: PDFFont,
+  hex: string,
+): { dropped: number } {
+  const size = findTextSize(block.size);
+  const sizePt = (size.mm / 25.4) * 72;
+  const innerWidthMm = Math.max(5, slot.widthMm - TEXT_PADDING_MM * 2);
+  const maxWidthPt = mmToPt(innerWidthMm);
+
+  const lines = wrapText(safeText(block.text, font), maxWidthPt, (value) =>
+    font.widthOfTextAtSize(value, sizePt),
+  );
+  const lineHeightMm = size.mm * LINE_HEIGHT;
+  const innerHeightMm = Math.max(lineHeightMm, slot.heightMm - TEXT_PADDING_MM * 2);
+  const fitting = Math.max(1, Math.floor(innerHeightMm / lineHeightMm));
+  const shown = lines.slice(0, fitting);
+
+  const blockHeightMm = shown.length * lineHeightMm;
+  const topMm = slot.yMm + (slot.heightMm - blockHeightMm) / 2;
+
+  shown.forEach((line, index) => {
+    if (!line) return;
+    const widthMm = (font.widthOfTextAtSize(line, sizePt) / 72) * 25.4;
+    const xMm =
+      block.align === "centre"
+        ? slot.xMm + (slot.widthMm - widthMm) / 2
+        : slot.xMm + TEXT_PADDING_MM;
+    // La ligne de base tombe aux trois quarts de l'interligne : le texte se
+    // pose alors dans la bande, comme l'aperçu le montre.
+    const baselineMm = topMm + index * lineHeightMm + size.mm;
+    const point = place(sheet, xMm, baselineMm, 0, 0);
+    sheet.page.drawText(line, { x: point.x, y: point.y, size: sizePt, font, color: color(hex) });
+  });
+
+  return { dropped: lines.length - shown.length };
+}
+
 /** Coupe un titre trop long pour la largeur disponible. */
 function fitText(text: string, font: PDFFont, sizePt: number, maxWidthPt: number): string {
   if (font.widthOfTextAtSize(text, sizePt) <= maxWidthPt) return text;
@@ -524,6 +608,20 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
     }
 
     for (const slot of bookPage.slots) {
+      if (slot.text) {
+        const { dropped } = drawTextBlock(sheet, slot, slot.text, body, theme.ink);
+        if (dropped > 0) {
+          warnings.push(
+            "Page " +
+              bookPage.number +
+              " : " +
+              dropped +
+              " ligne(s) de texte ne tiennent pas dans leur case et ne seront pas imprimées.",
+          );
+        }
+        continue;
+      }
+
       const photo = photos[slot.photoIndex];
       if (!photo) continue;
 
@@ -545,7 +643,7 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
 
       if (caption) {
         const size = 7.5;
-        const text = fitText(caption, italic, size, mmToPt(slot.widthMm));
+        const text = fitText(safeText(caption, italic), italic, size, mmToPt(slot.widthMm));
         const textWidthMm = (italic.widthOfTextAtSize(text, size) / 72) * 25.4;
         const p = place(
           sheet,

@@ -1,6 +1,7 @@
 import type { BookPlan } from "@/lib/book-layout";
 import type { BookTheme } from "@/lib/book-themes";
 import { effectFilter } from "@/lib/photo-effects";
+import { LINE_HEIGHT, TEXT_PADDING_MM, findTextSize } from "@/lib/text-blocks";
 import type { Framing } from "@/lib/photo-framing";
 import { slotKey, type SlotPosition } from "@/lib/use-slot-drag";
 import { findWallpaper, wallpaperScreenUrl, type Wallpaper } from "@/lib/wallpapers";
@@ -164,9 +165,10 @@ export function BookPages({
 
               {page.slots.map((slot, slotPosition) => {
                 const photo = photos[slot.photoIndex];
+                const block = slot.text;
                 // Une case vide n'est rien à la lecture, mais c'est là qu'on
                 // dépose une photo : en édition, elle doit exister.
-                if (!photo && !editable) return null;
+                if (!photo && !block && !editable) return null;
 
                 const key = editable ? slotKey({ page: photoPage, slot: slotPosition }) : null;
                 const caption = photo?.caption?.trim() ?? "";
@@ -193,7 +195,9 @@ export function BookPages({
                           tabIndex: 0,
                           "aria-label": photo
                             ? "Photo page " + page.number + ", appui long pour déplacer"
-                            : "Emplacement vide, page " + page.number,
+                            : block
+                              ? "Texte page " + page.number + ", touchez pour modifier"
+                              : "Emplacement vide, page " + page.number + ", touchez pour écrire",
                         }
                       : {})}
                     className={
@@ -261,9 +265,34 @@ export function BookPages({
                           </span>
                         ) : null}
                       </>
+                    ) : block ? (
+                      /* Le paragraphe occupe la case comme le ferait une photo.
+                         Sa taille est donnée en millimètres sur la page : on la
+                         convertit en unités de la case, pour que l'écran montre
+                         la proportion qui sera imprimée. */
+                      <span
+                        className="flex size-full items-center overflow-hidden"
+                        style={{
+                          containerType: "inline-size",
+                          justifyContent: block.align === "centre" ? "center" : "flex-start",
+                        }}
+                      >
+                        <span
+                          className="block w-full whitespace-pre-wrap break-words"
+                          style={{
+                            fontSize: (findTextSize(block.size).mm / slot.widthMm) * 100 + "cqw",
+                            lineHeight: LINE_HEIGHT,
+                            padding: (TEXT_PADDING_MM / slot.widthMm) * 100 + "%",
+                            textAlign: block.align === "centre" ? "center" : "left",
+                            color: theme.ink,
+                          }}
+                        >
+                          {block.text}
+                        </span>
+                      </span>
                     ) : (
                       <span className="flex size-full items-center justify-center rounded-[2px] border border-dashed border-black/20 text-[clamp(0.4rem,1.5cqw,0.6rem)] text-black/35">
-                        vide
+                        {editable ? "vide — touchez pour écrire" : ""}
                       </span>
                     )}
 
@@ -291,7 +320,8 @@ export function BookPages({
                 );
               })}
 
-              {page.kind === "photos" && page.slots.every((slot) => !photos[slot.photoIndex]) ? (
+              {page.kind === "photos" &&
+              page.slots.every((slot) => !photos[slot.photoIndex] && !slot.text) ? (
                 <span className="absolute inset-x-0 bottom-[14%] px-[12%] text-center text-xs text-black/35">
                   {editable ? "Page vide — déposez-y une photo." : "Page vide."}
                 </span>

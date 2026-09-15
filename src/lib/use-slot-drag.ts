@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AlbumLayout } from "./book-layout";
+import type { AlbumLayout, LayoutSlot } from "./book-layout";
 
 /**
  * Le geste qui déplace une photo d'une case à l'autre.
@@ -119,7 +119,8 @@ export function useSlotDrag({
     latest.current = { layout, onChange, selected, onTap };
   });
 
-  const photoAt = (position: SlotPosition | null): string | null => {
+  /** Ce que porte la case : photo, paragraphe, ou rien. */
+  const contentAt = (position: SlotPosition | null): LayoutSlot => {
     if (!position) return null;
     return latest.current.layout.pages[position.page]?.slots[position.slot] ?? null;
   };
@@ -152,7 +153,7 @@ export function useSlotDrag({
       return;
     }
 
-    const filled = Boolean(photoAt(position));
+    const filled = Boolean(contentAt(position));
     const handler = latest.current.onTap;
     if (handler) {
       handler(position, filled);
@@ -292,7 +293,7 @@ export function useSlotDrag({
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onCancel);
 
-    const filled = Boolean(photoAt(position));
+    const filled = Boolean(contentAt(position));
     const press: Press = {
       position,
       pointerId: event.pointerId,
@@ -344,16 +345,21 @@ export function useSlotDrag({
     [],
   );
 
-  const draggedId = drag ? (layout.pages[drag.from.page]?.slots[drag.from.slot] ?? null) : null;
-  const selectedId = selected ? (layout.pages[selected.page]?.slots[selected.slot] ?? null) : null;
+  /** Contenu soulevé et contenu armé : une photo s'affiche, un texte non. */
+  const draggedContent = drag
+    ? (layout.pages[drag.from.page]?.slots[drag.from.slot] ?? null)
+    : null;
+  const selectedContent = selected
+    ? (layout.pages[selected.page]?.slots[selected.slot] ?? null)
+    : null;
 
   return {
     rootRef,
     ghostRef,
     drag,
-    draggedId,
+    draggedContent,
     selected,
-    selectedId,
+    selectedContent,
     setSelected,
     hoverKey: hover,
     pressingKey: pressing,

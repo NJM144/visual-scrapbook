@@ -9,6 +9,7 @@
 
 import { findFormat, normalizePageCount, type PrintFormat } from "./print-formats";
 import type { BookTheme } from "./book-themes";
+import { isTextBlock, normalizeTextBlock, type TextBlock } from "./text-blocks";
 
 /** Espace entre deux photos d'une même page. */
 const GUTTER_MM = 5;
@@ -16,8 +17,15 @@ const GUTTER_MM = 5;
 export type PageKind = "titre" | "photos" | "colophon" | "blanche";
 
 export interface PhotoSlot {
-  /** Rang de la photo dans l'album. */
+  /** Rang de la photo dans l'album ; -1 quand la case n'en porte pas. */
   photoIndex: number;
+  /**
+   * Paragraphe occupant la case, à la place d'une photo.
+   *
+   * Une case porte l'un ou l'autre, jamais les deux : le texte se place et se
+   * déplace exactement comme une image, puisque c'est le même découpage.
+   */
+  text?: TextBlock;
   xMm: number;
   yMm: number;
   widthMm: number;
@@ -226,8 +234,16 @@ export function withPrintPadding(plan: BookPlan): BookPlan {
  * Une case vide (`null`) est volontaire : une page à moitié remplie est une
  * intention de mise en page, pas une erreur à combler.
  */
+/**
+ * Contenu d'une case : identifiant de photo, paragraphe, ou rien.
+ *
+ * Les albums composés avant les blocs de texte n'ont que des chaînes ; le
+ * format reste donc lisible tel quel, sans conversion.
+ */
+export type LayoutSlot = string | TextBlock | null;
+
 export interface AlbumLayout {
-  pages: ({ id: string; slots: (string | null)[] } & PageStyle)[];
+  pages: ({ id: string; slots: LayoutSlot[] } & PageStyle)[];
   /**
    * Effet appliqué à chaque photo dans ce livre, par identifiant de photo
    * (voir photo-effects.ts). L'album, lui, garde l'image d'origine : un effet
@@ -279,7 +295,7 @@ export function isAlbumLayout(value: unknown): value is AlbumLayout {
       Array.isArray(page.slots) &&
       page.slots.length >= 1 &&
       page.slots.length <= MAX_SLOTS_PER_PAGE &&
-      page.slots.every((slot) => slot === null || typeof slot === "string") &&
+      page.slots.every((slot) => slot === null || typeof slot === "string" || isTextBlock(slot)) &&
       isPageStyle(page),
   );
 }
@@ -315,7 +331,9 @@ export function layoutFromPlan(
       .filter((page) => page.kind === "photos")
       .map((page, index) => ({
         id: "p" + index + "-" + page.number,
-        slots: page.slots.map((slot) => photoIds[slot.photoIndex] ?? null),
+        slots: page.slots.map(
+          (slot): LayoutSlot => photoIds[slot.photoIndex] ?? (slot.text ? slot.text : null),
+        ),
         // Les réglages de page font l'aller-retour : les perdre ici, c'est
         // les perdre à la première retouche.
         ...(page.style ?? {}),
@@ -346,32 +364,44 @@ export function planFromLayout(
   const used = new Set<string>();
   const pages: BookPage[] = [{ kind: "titre", number: 1, slots: [] }];
 
-  const addPage = (ids: (string | null)[], style?: PageStyle) => {
-    const count = Math.max(1, Math.min(MAX_SLOTS_PER_PAGE, ids.length));
+  const addPage = (entries: LayoutSlot[], style?: PageStyle) => {
+    const count = Math.max(1, Math.min(MAX_SLOTS_PER_PAGE, entries.length));
     // L'auteur a le dernier mot sur l'orientation ; sinon, les photos décident.
+    // Un paragraphe ne vote pas : il s'accommode de la forme qu'on lui donne.
     const bias =
       style?.flow === "cote"
         ? true
         : style?.flow === "pile"
           ? false
           : portraitMajority(
-              ids
-                .map((id) => (id ? (aspects[indexById.get(id) ?? -1] ?? 0) : 0))
+              entries
+                .map((entry) =>
+                  typeof entry === "string" ? (aspects[indexById.get(entry) ?? -1] ?? 0) : 0,
+                )
                 .filter((a) => a > 0),
             );
 
-    const slots = buildSlots(margin, margin, boxW, boxH, count, bias).map((slot, position) => ({
-      ...slot,
-      photoIndex: indexById.get(ids[position] ?? "") ?? -1,
-    }));
+    const slots = buildSlots(margin, margin, boxW, boxH, count, bias).map((slot, position) => {
+      const entry = entries[position] ?? null;
+      if (entry && typeof entry !== "string") {
+        return { ...slot, photoIndex: -1, text: normalizeTextBlock(entry) };
+      }
+      return { ...slot, photoIndex: indexById.get(entry ?? "") ?? -1 };
+    });
 
     pages.push({ kind: "photos", number: pages.length + 1, slots, ...(style ? { style } : {}) });
   };
 
   for (const page of layout.pages) {
-    const ids = page.slots.map((id) => (id && indexById.has(id) ? id : null));
-    for (const id of ids) if (id) used.add(id);
-    addPage(ids, pageStyleOf(page));
+    // Une photo disparue de l'album laisse sa case vide ; les paragraphes,
+    // eux, ne dépendent de rien et passent tels quels.
+    const entries = page.slots.map((slot): LayoutSlot => {
+      if (slot === null) return null;
+      if (typeof slot === "string") return indexById.has(slot) ? slot : null;
+      return slot;
+    });
+    for (const entry of entries) if (typeof entry === "string") used.add(entry);
+    addPage(entries, pageStyleOf(page));
   }
 
   const orphans = photoIds.filter((id) => !used.has(id));

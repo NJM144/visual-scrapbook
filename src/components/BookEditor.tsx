@@ -5,11 +5,25 @@ import {
   MAX_SLOTS_PER_PAGE,
   type AlbumLayout,
   type BookPlan,
+  type LayoutSlot,
   type PageFlow,
   type PageStyle,
 } from "@/lib/book-layout";
 import type { BookTheme } from "@/lib/book-themes";
-import { GHOST_LIFT, GHOST_SIZE, slotKey, useSlotDrag } from "@/lib/use-slot-drag";
+import {
+  DEFAULT_TEXT_SIZE,
+  MAX_TEXT_LENGTH,
+  TEXT_SIZES,
+  type TextAlign,
+  type TextBlock,
+} from "@/lib/text-blocks";
+import {
+  GHOST_LIFT,
+  GHOST_SIZE,
+  slotKey,
+  useSlotDrag,
+  type SlotPosition,
+} from "@/lib/use-slot-drag";
 import { WALLPAPERS, wallpaperScreenUrl, type Wallpaper } from "@/lib/wallpapers";
 
 /** Couleurs de fond proposées à la page ; le thème reste le premier choix. */
@@ -100,30 +114,61 @@ export function BookEditor({
 }) {
   /** Photo dont le panneau d'actions est ouvert. */
   const [openPhoto, setOpenPhoto] = useState<string | null>(null);
+  /** Case dont le paragraphe est en cours d'écriture. */
+  const [openText, setOpenText] = useState<SlotPosition | null>(null);
   /** Page dont les réglages sont ouverts : rang parmi les pages de photos, numéro imprimé. */
   const [openPage, setOpenPage] = useState<{ index: number; number: number } | null>(null);
 
   const photoById = new Map(photos.map((photo) => [photo.id, photo]));
-  const urlOf = (id: string | null) => {
-    if (!id) return undefined;
-    const photo = photoById.get(id);
+  /** La vignette d'une case ; rien pour un paragraphe, qui n'est pas une image. */
+  const urlOf = (content: LayoutSlot) => {
+    if (typeof content !== "string") return undefined;
+    const photo = photoById.get(content);
     return photo ? photo.thumbUrl || photo.signedUrl : undefined;
+  };
+
+  const contentAt = (position: SlotPosition | null): LayoutSlot =>
+    position ? (layout.pages[position.page]?.slots[position.slot] ?? null) : null;
+
+  /** Le paragraphe d'une case, s'il y en a un. */
+  const textAt = (position: SlotPosition | null): TextBlock | null => {
+    const content = contentAt(position);
+    return content && typeof content !== "string" ? content : null;
+  };
+
+  /** Écrit, modifie ou retire le paragraphe d'une case. */
+  const setSlotContent = (position: SlotPosition, content: LayoutSlot) => {
+    onLayoutChange({
+      pages: layout.pages.map((page, pageIndex) =>
+        pageIndex === position.page
+          ? { ...page, slots: page.slots.map((slot, i) => (i === position.slot ? content : slot)) }
+          : page,
+      ),
+    });
+  };
+
+  const patchText = (position: SlotPosition, patch: Partial<TextBlock>) => {
+    const current = textAt(position) ?? { text: "" };
+    setSlotContent(position, { ...current, ...patch });
   };
 
   const drag = useSlotDrag({
     layout,
     onChange: onLayoutChange,
-    onTap: (position, filled) => {
-      if (!filled) return;
-      const id = layout.pages[position.page]?.slots[position.slot] ?? null;
-      if (id) setOpenPhoto(id);
+    // Une photo ouvre ses actions ; une case vide ou un paragraphe ouvrent
+    // l'écriture. Toucher une case vide et pouvoir y écrire, c'est ce qui
+    // rend le texte aussi accessible qu'une photo.
+    onTap: (position) => {
+      const content = layout.pages[position.page]?.slots[position.slot] ?? null;
+      if (typeof content === "string") setOpenPhoto(content);
+      else setOpenText(position);
     },
   });
 
   const armMove = () => {
     if (!openPhoto) return;
     for (const [pageIndex, page] of layout.pages.entries()) {
-      const slot = page.slots.indexOf(openPhoto);
+      const slot = page.slots.findIndex((content) => content === openPhoto);
       if (slot !== -1) {
         drag.setSelected({ page: pageIndex, slot });
         break;
@@ -144,15 +189,24 @@ export function BookEditor({
 
   const removePage = (photoPage: number) => {
     const page = layout.pages[photoPage];
-    const filled = page?.slots.filter(Boolean).length ?? 0;
-    if (
-      filled > 0 &&
-      !window.confirm(
-        "Cette page contient " +
-          filled +
-          " photo(s). Elles seront replacées à la fin du livre. Continuer ?",
-      )
-    ) {
+    const slots = page?.slots ?? [];
+    const photoCount = slots.filter((slot) => typeof slot === "string").length;
+    const textCount = slots.filter((slot) => slot !== null && typeof slot !== "string").length;
+    // Une photo retirée d'ici revient à la fin du livre ; un paragraphe, lui,
+    // n'existe que dans cette page et disparaît avec elle. Il faut le dire.
+    const message =
+      photoCount > 0 && textCount > 0
+        ? "Cette page contient " +
+          photoCount +
+          " photo(s), replacée(s) à la fin du livre, et " +
+          textCount +
+          " texte(s), qui seront perdus. Continuer ?"
+        : photoCount > 0
+          ? "Cette page contient " +
+            photoCount +
+            " photo(s). Elles seront replacées à la fin du livre. Continuer ?"
+          : "Cette page contient " + textCount + " texte(s), qui seront perdus. Continuer ?";
+    if (photoCount + textCount > 0 && !window.confirm(message)) {
       return;
     }
     onLayoutChange({ pages: layout.pages.filter((_, index) => index !== photoPage) });
@@ -191,9 +245,10 @@ export function BookEditor({
     onLayoutChange({ pages: layout.pages.map((page) => mergeStyle(page, patch)) });
   };
 
-  const draggedUrl = urlOf(drag.draggedId);
-  const selectedUrl = urlOf(drag.selectedId);
+  const draggedUrl = urlOf(drag.draggedContent);
+  const selectedUrl = urlOf(drag.selectedContent);
   const openUrl = urlOf(openPhoto);
+  const openTextBlock = textAt(openText);
   const pageOpen = openPage ? layout.pages[openPage.index] : undefined;
   const pageWallpaperId =
     pageOpen && pageOpen.wallpaper !== undefined ? pageOpen.wallpaper : wallpaper?.id;
@@ -265,9 +320,18 @@ export function BookEditor({
 
       {/* La sélection reste visible une fois la page défilée. Même empreinte
           que la barre d'actions qu'il recouvre : il ne masque rien de plus. */}
-      {drag.selected && selectedUrl ? (
+      {drag.selected && (selectedUrl || drag.selectedContent) ? (
         <div className="above-mobile-nav fixed inset-x-3 z-[60] mx-auto flex max-w-md items-center gap-2.5 rounded-full border border-border bg-card/95 p-1.5 pl-2 shadow-xl backdrop-blur">
-          <img src={selectedUrl} alt="" className="size-10 shrink-0 rounded-full object-cover" />
+          {selectedUrl ? (
+            <img src={selectedUrl} alt="" className="size-10 shrink-0 rounded-full object-cover" />
+          ) : (
+            <span
+              aria-hidden
+              className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted font-serif text-lg text-foreground"
+            >
+              T
+            </span>
+          )}
           <p className="min-w-0 flex-1 text-sm leading-tight text-foreground">
             Touchez la case de destination.
           </p>
@@ -322,6 +386,126 @@ export function BookEditor({
             </button>
 
             {renderPhotoActions(openPhoto, () => setOpenPhoto(null))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Écrire dans une case : un paragraphe se place, se déplace et se
+          supprime comme une photo. Le panneau monte du bas, comme les autres. */}
+      {openText ? (
+        <div className="fixed inset-0 z-[65] flex items-end justify-center sm:items-center">
+          <button
+            type="button"
+            aria-label="Fermer"
+            onClick={() => setOpenText(null)}
+            className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
+          />
+          <div className="relative max-h-[85svh] w-full overflow-y-auto rounded-t-3xl border border-border bg-card p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl sm:max-w-lg sm:rounded-3xl sm:pb-5">
+            <div className="mb-4 flex items-center gap-3">
+              <span
+                aria-hidden
+                className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-muted font-serif text-2xl text-foreground"
+              >
+                T
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground">
+                  {openTextBlock ? "Ce texte" : "Écrire dans cette case"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Un paragraphe à côté de vos photos : qui, où, ce jour-là.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpenText(null)}
+                aria-label="Fermer"
+                className="size-11 shrink-0 rounded-full border border-input text-sm transition-colors hover:bg-muted"
+              >
+                ✕
+              </button>
+            </div>
+
+            <textarea
+              value={openTextBlock?.text ?? ""}
+              maxLength={MAX_TEXT_LENGTH}
+              rows={6}
+              autoFocus
+              placeholder="Ce matin-là, toute la famille est venue de Bouaké…"
+              onChange={(event) => patchText(openText, { text: event.target.value })}
+              className="w-full resize-y rounded-xl border border-input bg-background px-4 py-3 text-base outline-none focus:ring-2 focus:ring-ring"
+            />
+            <p className="mt-1 text-right text-xs text-muted-foreground">
+              {(openTextBlock?.text ?? "").length} / {MAX_TEXT_LENGTH}
+            </p>
+
+            <p className="mt-4 mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+              Taille
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {TEXT_SIZES.map((size) => (
+                <button
+                  key={size.id}
+                  type="button"
+                  onClick={() => patchText(openText, { size: size.id })}
+                  className={
+                    "h-10 rounded-full border px-4 text-sm transition-colors " +
+                    ((openTextBlock?.size ?? DEFAULT_TEXT_SIZE) === size.id
+                      ? "border-terre bg-terre/10 text-foreground"
+                      : "border-input text-foreground hover:bg-muted")
+                  }
+                >
+                  {size.label}
+                </button>
+              ))}
+            </div>
+
+            <p className="mt-5 mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+              Alignement
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  { id: "gauche", label: "À gauche" },
+                  { id: "centre", label: "Centré" },
+                ] as { id: TextAlign; label: string }[]
+              ).map((align) => (
+                <button
+                  key={align.id}
+                  type="button"
+                  onClick={() => patchText(openText, { align: align.id })}
+                  className={
+                    "h-10 rounded-full border px-4 text-sm transition-colors " +
+                    ((openTextBlock?.align ?? "gauche") === align.id
+                      ? "border-terre bg-terre/10 text-foreground"
+                      : "border-input text-foreground hover:bg-muted")
+                  }
+                >
+                  {align.label}
+                </button>
+              ))}
+            </div>
+
+            {openTextBlock ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSlotContent(openText, null);
+                  setOpenText(null);
+                }}
+                className="mt-6 h-11 w-full rounded-full border border-input px-4 text-sm text-destructive transition-colors hover:bg-destructive/10"
+              >
+                Retirer ce texte — la case redevient libre
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => setOpenText(null)}
+              className="mt-2 h-11 w-full rounded-full bg-terre px-4 text-sm font-medium text-white transition-colors hover:bg-terre/90"
+            >
+              Terminé
+            </button>
           </div>
         </div>
       ) : null}

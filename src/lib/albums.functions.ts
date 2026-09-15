@@ -721,7 +721,24 @@ export const updateAlbumLayout = createServerFn({ method: "POST" })
               .array(
                 z.object({
                   id: z.string().min(1).max(64),
-                  slots: z.array(z.string().uuid().nullable()).min(1).max(4),
+                  // Une case porte une photo (son identifiant), un paragraphe,
+                  // ou rien. Le paragraphe est décrit ici champ par champ :
+                  // zod retirerait en silence tout ce qui n'est pas déclaré.
+                  slots: z
+                    .array(
+                      z
+                        .union([
+                          z.string().uuid(),
+                          z.object({
+                            text: z.string().max(1200),
+                            align: z.enum(["gauche", "centre"]).optional(),
+                            size: z.enum(["petit", "moyen", "grand", "titre"]).optional(),
+                          }),
+                        ])
+                        .nullable(),
+                    )
+                    .min(1)
+                    .max(4),
                   // Réglages propres à la page (voir PageStyle) : sans eux ici,
                   // zod les retirerait en silence avant l'écriture.
                   paper: z

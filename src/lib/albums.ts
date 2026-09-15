@@ -1,3 +1,5 @@
+import type { AlbumLayout } from "./book-layout";
+
 export interface Album {
   id: string;
   user_id: string;
@@ -24,11 +26,7 @@ export interface Album {
    * Typée explicitement plutôt qu'en `unknown` : les valeurs traversant une
    * fonction serveur doivent être sérialisables de façon vérifiable.
    */
-  layout: {
-    pages: { id: string; slots: (string | null)[] }[];
-    /** Effet de chaque photo dans ce livre (voir photo-effects.ts). */
-    effects?: Record<string, string>;
-  } | null;
+  layout: AlbumLayout | null;
 }
 
 export interface Photo {
