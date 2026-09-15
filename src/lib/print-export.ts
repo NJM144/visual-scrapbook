@@ -410,7 +410,7 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   const interior = await PDFDocument.create();
   interior.setTitle(meta.title);
   interior.setSubject("Intérieur — " + format.label);
-  interior.setCreator("Anthologie");
+  interior.setCreator("PhotoZo");
 
   const serif = await interior.embedFont(StandardFonts.TimesRoman);
   const serifItalic = await interior.embedFont(StandardFonts.TimesRomanItalic);
@@ -575,7 +575,7 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   const cover = await PDFDocument.create();
   cover.setTitle(meta.title + " — couverture");
   cover.setSubject("Couverture — dos " + spine + " mm");
-  cover.setCreator("Anthologie");
+  cover.setCreator("PhotoZo");
 
   const coverSerif = await cover.embedFont(StandardFonts.TimesRoman);
   const coverSerifItalic = await cover.embedFont(StandardFonts.TimesRomanItalic);

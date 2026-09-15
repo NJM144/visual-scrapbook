@@ -7,7 +7,7 @@ import { findTheme } from "@/lib/book-themes";
 
 export const Route = createFileRoute("/_authenticated/admin")({
   head: () => ({
-    meta: [{ title: "Administration — Anthologie" }],
+    meta: [{ title: "Administration — PhotoZo" }],
   }),
   component: AdminPage,
 });

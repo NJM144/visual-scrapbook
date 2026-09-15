@@ -156,6 +156,9 @@ function openDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === "undefined") return Promise.resolve(null);
   dbPromise ??= new Promise((resolve) => {
     try {
+      // Nom d'origine gardé volontairement malgré le passage à PhotoZo : le
+      // renommer abandonnerait les envois en attente sur les téléphones qui
+      // ont déjà ouvert le site.
       const request = indexedDB.open("anthologie-envois", 1);
       request.onupgradeneeded = () =>
         request.result.createObjectStore("items", { keyPath: "photoId" });

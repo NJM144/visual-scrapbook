@@ -10,13 +10,13 @@ const MOBILE_FIRST_SIZES = "(max-width: 640px) 50vw, 100vw";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Anthologie — Vos albums photos" },
+      { title: "PhotoZo — Vos albums photos" },
       {
         name: "description",
         content:
           "Mariages, baptêmes, anniversaires, réunions de famille : importez les photos de votre téléphone, elles se rangent toutes seules, un album par événement.",
       },
-      { property: "og:title", content: "Anthologie — Vos albums photos" },
+      { property: "og:title", content: "PhotoZo — Vos albums photos" },
       {
         property: "og:description",
         content:
@@ -78,7 +78,7 @@ function HomePage() {
           </h1>
           <p className="mt-6 max-w-[52ch] text-pretty text-lg leading-relaxed text-white/85">
             Mariages, baptêmes, anniversaires, réunions de famille : importez les photos de votre
-            téléphone, Anthologie lit leur date de prise de vue et en fait un album par événement.
+            téléphone, PhotoZo lit leur date de prise de vue et en fait un album par événement.
           </p>
           <div className="mt-10 flex flex-wrap gap-3">
             <Link
@@ -135,7 +135,7 @@ function HomePage() {
         <div className="mx-auto max-w-3xl px-6 py-24 text-center lg:py-32">
           <p className="text-balance font-serif text-3xl leading-snug text-white md:text-4xl">
             Le baptême du samedi et le repas de famille du dimanche ne racontent pas la même
-            histoire. Anthologie s’en souvient pour vous.
+            histoire. PhotoZo s’en souvient pour vous.
           </p>
         </div>
       </section>

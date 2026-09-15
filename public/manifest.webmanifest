@@ -1,6 +1,6 @@
 {
-  "name": "Anthologie",
-  "short_name": "Anthologie",
+  "name": "PhotoZo",
+  "short_name": "PhotoZo",
   "description": "Vos albums photos de famille, rangés tout seuls.",
   "lang": "fr",
   "start_url": "/albums",

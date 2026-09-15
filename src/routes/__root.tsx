@@ -91,15 +91,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "theme-color", content: "#FBF6EE" },
       { name: "mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
-      { name: "apple-mobile-web-app-title", content: "Anthologie" },
+      { name: "apple-mobile-web-app-title", content: "PhotoZo" },
       { name: "apple-mobile-web-app-status-bar-style", content: "default" },
-      { title: "Anthologie — Vos albums photos" },
+      { title: "PhotoZo — Vos albums photos" },
       {
         name: "description",
         content: "Créez et partagez vos albums photos dans un espace calme et élégant.",
       },
-      { name: "author", content: "Anthologie" },
-      { property: "og:title", content: "Anthologie — Vos albums photos" },
+      { name: "author", content: "PhotoZo" },
+      { property: "og:title", content: "PhotoZo — Vos albums photos" },
       {
         property: "og:description",
         content: "Créez et partagez vos albums photos dans un espace calme et élégant.",
@@ -261,7 +261,7 @@ function Header() {
           to="/"
           className="shrink-0 font-serif text-xl tracking-tight text-foreground sm:text-2xl"
         >
-          Anthologie
+          PhotoZo
         </Link>
         {/* Barre défilante : sur un téléphone, quatre liens et un bouton ne
             tiennent pas côte à côte sans écraser le logo. */}
@@ -317,7 +317,7 @@ function Footer() {
     <footer className="border-t border-border py-10 sm:py-16">
       <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row justify-between gap-12">
         <div className="max-w-[40ch]">
-          <span className="font-serif text-xl mb-4 block text-foreground">Anthologie</span>
+          <span className="font-serif text-xl mb-4 block text-foreground">PhotoZo</span>
           <p className="text-sm text-muted-foreground">
             Conçu pour l’observateur patient. Construisez votre héritage numérique une image à la
             fois.

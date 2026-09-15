@@ -1,7 +1,7 @@
 /**
  * Photographies d'événements familiaux utilisées comme décor du site.
  *
- * Anthologie sert à garder les mariages, baptêmes, anniversaires et réunions
+ * PhotoZo sert à garder les mariages, baptêmes, anniversaires et réunions
  * de famille : le décor doit montrer des gens qui se retrouvent, pas des
  * paysages. Toutes viennent de Wikimedia Commons (concours Wiki Loves Africa)
  * sous CC BY-SA 4.0, qui impose de créditer l'auteur : les mentions ci-dessous

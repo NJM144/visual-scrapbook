@@ -1,5 +1,5 @@
 /*
- * Service Worker d'Anthologie : cache des vignettes et versions d'affichage.
+ * Service Worker de PhotoZo : cache des vignettes et versions d'affichage.
  *
  * Les photos passent par des URL signées dont le jeton change à chaque
  * signature, et Supabase ne renvoie pas d'en-tête Cache-Control : le
@@ -11,12 +11,23 @@
  * Seules les versions transformées (vignette, affichage) sont concernées. Le
  * fichier d'impression n'est jamais mis en cache.
  */
-const CACHE = "anthologie-photos-v1";
+const CACHE = "photozo-photos-v1";
 const MAX_ENTRIES = 2000;
 const RENDER_PATH = "/storage/v1/render/image/sign/photos/";
 
 self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+// Le cache s'appelait « anthologie-photos-v1 » avant le changement de nom :
+// on le supprime à l'activation, sinon il resterait sur le téléphone sans
+// jamais être relu.
+self.addEventListener("activate", (event) =>
+  event.waitUntil(
+    (async () => {
+      const names = await caches.keys();
+      await Promise.all(names.filter((name) => name !== CACHE).map((name) => caches.delete(name)));
+      await self.clients.claim();
+    })(),
+  ),
+);
 
 function stableKey(requestUrl) {
   const url = new URL(requestUrl);
@@ -25,7 +36,7 @@ function stableKey(requestUrl) {
   try {
     const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
     if (!payload.url) return null;
-    return url.origin + "/anthologie-cache/" + payload.url + "?" + (payload.transformations || "");
+    return url.origin + "/photozo-cache/" + payload.url + "?" + (payload.transformations || "");
   } catch {
     return null;
   }

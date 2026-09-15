@@ -46,7 +46,7 @@ import {
 export const Route = createFileRoute("/_authenticated/albums/book/$albumId")({
   head: () => ({
     meta: [
-      { title: "Mon livre — Anthologie" },
+      { title: "Mon livre — PhotoZo" },
       {
         name: "description",
         content: "Feuilletez votre album, disposez les photos, ajoutez des légendes.",

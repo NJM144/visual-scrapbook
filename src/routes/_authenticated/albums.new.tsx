@@ -14,12 +14,12 @@ import { findWallpaper } from "@/lib/wallpapers";
 export const Route = createFileRoute("/_authenticated/albums/new")({
   head: () => ({
     meta: [
-      { title: "Nouvel album — Anthologie" },
+      { title: "Nouvel album — PhotoZo" },
       {
         name: "description",
         content: "Créez un nouvel album photo et commencez à y relier vos souvenirs.",
       },
-      { property: "og:title", content: "Nouvel album — Anthologie" },
+      { property: "og:title", content: "Nouvel album — PhotoZo" },
       {
         property: "og:description",
         content: "Créez un nouvel album photo et commencez à y relier vos souvenirs.",

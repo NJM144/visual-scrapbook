@@ -9,15 +9,15 @@ import { supportsLovableOAuth } from "@/lib/hosting";
 export const Route = createFileRoute("/auth")({
   head: () => ({
     meta: [
-      { title: "Connexion — Anthologie" },
+      { title: "Connexion — PhotoZo" },
       {
         name: "description",
-        content: "Connectez-vous à Anthologie pour créer et retrouver vos albums photos.",
+        content: "Connectez-vous à PhotoZo pour créer et retrouver vos albums photos.",
       },
-      { property: "og:title", content: "Connexion — Anthologie" },
+      { property: "og:title", content: "Connexion — PhotoZo" },
       {
         property: "og:description",
-        content: "Connectez-vous à Anthologie pour créer et retrouver vos albums photos.",
+        content: "Connectez-vous à PhotoZo pour créer et retrouver vos albums photos.",
       },
     ],
   }),

@@ -27,7 +27,7 @@ import { DEFAULT_COVER_TEMPLATE, findCoverTemplate } from "@/lib/cover-templates
 export const Route = createFileRoute("/_authenticated/albums/import")({
   head: () => ({
     meta: [
-      { title: "Importer depuis mon téléphone — Anthologie" },
+      { title: "Importer depuis mon téléphone — PhotoZo" },
       {
         name: "description",
         content:

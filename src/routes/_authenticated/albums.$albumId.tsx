@@ -15,12 +15,12 @@ import { PhotoViewer, type ViewerItem } from "@/components/PhotoViewer";
 export const Route = createFileRoute("/_authenticated/albums/$albumId")({
   head: () => ({
     meta: [
-      { title: "Album — Anthologie" },
+      { title: "Album — PhotoZo" },
       {
         name: "description",
         content: "Consultez les photographies de votre album et ajoutez-en de nouvelles.",
       },
-      { property: "og:title", content: "Album — Anthologie" },
+      { property: "og:title", content: "Album — PhotoZo" },
       {
         property: "og:description",
         content: "Consultez les photographies de votre album et ajoutez-en de nouvelles.",
