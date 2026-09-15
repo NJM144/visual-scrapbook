@@ -733,6 +733,10 @@ export const updateAlbumLayout = createServerFn({ method: "POST" })
                 }),
               )
               .max(300),
+            // Effet par photo (voir photo-effects.ts). Même piège que les
+            // réglages de page : non déclaré ici, zod le retirerait avant
+            // l'écriture et l'enregistrement « réussirait » sans rien garder.
+            effects: z.record(z.string().uuid(), z.string().min(1).max(24)).optional(),
           })
           .nullable(),
       })

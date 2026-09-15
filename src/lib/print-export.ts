@@ -31,6 +31,7 @@ import {
   motifPath,
   resolveMotif,
 } from "./cover-templates";
+import { applyEffectToImageData, effectFilter, effectMatrix } from "./photo-effects";
 import { computePlacement, normalizeFraming, printedDpi, type Framing } from "./photo-framing";
 import { findWallpaper, wallpaperPrintUrl, type Wallpaper } from "./wallpapers";
 
@@ -51,6 +52,8 @@ export interface ExportPhoto {
   url: string;
   /** Légende imprimée sous l'image. */
   caption?: string | null;
+  /** Effet du livre (voir photo-effects.ts) ; absent, la photo sort telle quelle. */
+  effect?: string | null;
   /** Cadrage choisi par l'auteur ; centré et couvrant par défaut. */
   framing?: Partial<Framing> | null;
 }
@@ -109,6 +112,7 @@ async function renderSlot(
   heightMm: number,
   framing: Framing,
   paperHex: string,
+  effect?: string | null,
 ): Promise<Rendered> {
   const bitmap = await loadBitmap(url);
   const targetW = Math.max(1, mmToPx(widthMm));
@@ -129,7 +133,30 @@ async function renderSlot(
 
   const placement = computePlacement(bitmap.width, bitmap.height, targetW, targetH, framing);
   const { sx, sy, sw, sh } = placement.source;
+
+  // L'effet est cuit ici, dans les pixels envoyés à l'imprimeur : c'est le
+  // moteur qui dessine le `filter` CSS de l'aperçu, donc le même rendu. Le
+  // filtre est posé après le fond, sinon le papier changerait de couleur.
+  const filter = effectFilter(effect);
+  const canFilter = filter !== undefined && "filter" in context;
+  if (canFilter) context.filter = filter;
   context.drawImage(bitmap, sx, sy, sw, sh, placement.dx, placement.dy, placement.dw, placement.dh);
+  if (canFilter) context.filter = "none";
+
+  // Navigateur sans `context.filter` : mêmes coefficients, appliqués à la main
+  // et seulement sur la photo — les marges gardent la couleur du papier.
+  if (filter !== undefined && !canFilter) {
+    const matrix = effectMatrix(effect);
+    const dx = Math.max(0, Math.floor(placement.dx));
+    const dy = Math.max(0, Math.floor(placement.dy));
+    const dw = Math.min(targetW - dx, Math.ceil(placement.dw));
+    const dh = Math.min(targetH - dy, Math.ceil(placement.dh));
+    if (matrix && dw > 0 && dh > 0) {
+      const region = context.getImageData(dx, dy, dw, dh);
+      applyEffectToImageData(region.data, matrix);
+      context.putImageData(region, dx, dy);
+    }
+  }
 
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY),
@@ -511,6 +538,7 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
         imageHeight,
         normalizeFraming(photo.framing),
         paper,
+        photo.effect,
       );
       const image = await interior.embedJpg(rendered.bytes);
       sheet.page.drawImage(image, place(sheet, slot.xMm, slot.yMm, slot.widthMm, imageHeight));
@@ -636,6 +664,7 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
       heightMm,
       normalizeFraming(photo.framing),
       theme.coverBackground,
+      photo.effect,
     );
     const image = await cover.embedJpg(rendered.bytes);
     sheet.page.drawImage(image, place(sheet, xMm, yMm, widthMm, heightMm));

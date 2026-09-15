@@ -228,6 +228,15 @@ export function withPrintPadding(plan: BookPlan): BookPlan {
  */
 export interface AlbumLayout {
   pages: ({ id: string; slots: (string | null)[] } & PageStyle)[];
+  /**
+   * Effet appliqué à chaque photo dans ce livre, par identifiant de photo
+   * (voir photo-effects.ts). L'album, lui, garde l'image d'origine : un effet
+   * est une décision de mise en page, pas une retouche du fichier.
+   *
+   * Rangé par photo et non par case : déplacer une photo d'une page à l'autre
+   * lui laisse son effet, ce qui est ce qu'on attend en la promenant.
+   */
+  effects?: Record<string, string>;
 }
 
 /** Les réglages de page présents, sans les clés absentes : le JSON reste net. */
@@ -260,6 +269,9 @@ export function isAlbumLayout(value: unknown): value is AlbumLayout {
   const pages = (value as AlbumLayout).pages;
   if (!Array.isArray(pages)) return false;
 
+  const effects = (value as AlbumLayout).effects;
+  if (effects !== undefined && (typeof effects !== "object" || effects === null)) return false;
+
   return pages.every(
     (page) =>
       page &&
@@ -272,9 +284,33 @@ export function isAlbumLayout(value: unknown): value is AlbumLayout {
   );
 }
 
-/** Construit une disposition modifiable à partir du découpage automatique. */
-export function layoutFromPlan(plan: BookPlan, photoIds: string[]): AlbumLayout {
+/** Les effets d'un livre, filtrés de ce qui n'est pas exploitable. */
+function readEffects(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const effects: Record<string, string> = {};
+  for (const [photoId, effectId] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof effectId === "string" && effectId.length > 0 && effectId.length <= 24) {
+      effects[photoId] = effectId;
+    }
+  }
+  return Object.keys(effects).length > 0 ? effects : undefined;
+}
+
+/**
+ * Construit une disposition modifiable à partir du découpage automatique.
+ *
+ * `effects` fait l'aller-retour : le studio reconstruit la disposition affichée
+ * à chaque rendu, et l'oublier ici effacerait les effets à la première
+ * retouche de page.
+ */
+export function layoutFromPlan(
+  plan: BookPlan,
+  photoIds: string[],
+  effects?: Record<string, string> | undefined,
+): AlbumLayout {
+  const kept = readEffects(effects);
   return {
+    ...(kept ? { effects: kept } : {}),
     pages: plan.pages
       .filter((page) => page.kind === "photos")
       .map((page, index) => ({

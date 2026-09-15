@@ -1,4 +1,5 @@
 import type { BookTheme } from "@/lib/book-themes";
+import { effectFilter } from "@/lib/photo-effects";
 import type { PrintFormat } from "@/lib/print-formats";
 import { wallpaperScreenUrl, type Wallpaper } from "@/lib/wallpapers";
 import {
@@ -23,6 +24,7 @@ export function CoverPreview({
   title,
   subtitle,
   photoUrl,
+  photoEffect,
   templateId,
   wallpaper,
   compact = false,
@@ -32,6 +34,8 @@ export function CoverPreview({
   title: string;
   subtitle: string;
   photoUrl?: string | undefined;
+  /** Effet du livre posé sur la photo de couverture (voir photo-effects.ts). */
+  photoEffect?: string | null | undefined;
   templateId?: string | undefined;
   /** Papier peint sous la composition ; absent, le fond uni du thème. */
   wallpaper?: Wallpaper | null | undefined;
@@ -41,6 +45,8 @@ export function CoverPreview({
   const template = findCoverTemplate(templateId);
   const motif = resolveMotif(template, theme);
   const hasPhoto = Boolean(photoUrl) && template.needsPhoto;
+  // Le PDF cuit cet effet dans la photo de couverture : l'aperçu doit le montrer.
+  const photoFilter = effectFilter(photoEffect);
 
   return (
     <figure>
@@ -80,6 +86,7 @@ export function CoverPreview({
           title={title}
           subtitle={subtitle}
           photoUrl={hasPhoto ? photoUrl : undefined}
+          photoFilter={photoFilter}
         />
       </div>
 
@@ -165,6 +172,7 @@ function Composition({
   title,
   subtitle,
   photoUrl,
+  photoFilter,
 }: {
   template: CoverTemplate;
   theme: BookTheme;
@@ -172,6 +180,8 @@ function Composition({
   title: string;
   subtitle: string;
   photoUrl?: string | undefined;
+  /** Filtre CSS de l'effet, tel qu'il sera cuit dans le PDF. */
+  photoFilter?: string | undefined;
 }) {
   const ink = theme.coverInk;
 
@@ -179,7 +189,12 @@ function Composition({
     return (
       <>
         {photoUrl ? (
-          <img src={photoUrl} alt="" className="absolute inset-0 -z-10 size-full object-cover" />
+          <img
+            src={photoUrl}
+            alt=""
+            style={{ filter: photoFilter }}
+            className="absolute inset-0 -z-10 size-full object-cover"
+          />
         ) : null}
         <span
           aria-hidden
@@ -205,7 +220,7 @@ function Composition({
             src={photoUrl}
             alt=""
             className="mt-[6%] w-full flex-1 object-cover"
-            style={{ maxHeight: "58%" }}
+            style={{ maxHeight: "58%", filter: photoFilter }}
           />
         ) : null}
         <Motif motif={motif} color={ink} className="mx-auto mt-[5%] w-[18%]" opacity={0.75} />
@@ -227,7 +242,12 @@ function Composition({
         </div>
         {photoUrl ? (
           <div className="absolute left-1/2 top-[46%] w-[46%] -translate-x-1/2 -translate-y-1/2 bg-white p-[4%] pb-[12%] shadow-lg">
-            <img src={photoUrl} alt="" className="aspect-square w-full object-cover" />
+            <img
+              src={photoUrl}
+              alt=""
+              style={{ filter: photoFilter }}
+              className="aspect-square w-full object-cover"
+            />
           </div>
         ) : null}
         {subtitle ? (
@@ -259,6 +279,7 @@ function Composition({
           <img
             src={photoUrl}
             alt=""
+            style={{ filter: photoFilter }}
             className="absolute bottom-[8%] right-[8%] aspect-[4/3] w-[38%] object-cover shadow-md"
           />
         ) : null}
@@ -304,6 +325,7 @@ function Composition({
           <img
             src={photoUrl}
             alt=""
+            style={{ filter: photoFilter }}
             className="absolute inset-x-0 top-0 h-[62%] w-full object-cover"
           />
         ) : null}

@@ -34,6 +34,7 @@ import { PhotoFramer } from "@/components/PhotoFramer";
 import { useAuth } from "@/hooks/use-auth";
 import { describePhotoAI, suggestAlbumTextsAI } from "@/lib/ai.functions";
 import { createAiThumbnail } from "@/lib/image-processing";
+import { PHOTO_EFFECTS, effectFilter } from "@/lib/photo-effects";
 import { normalizeFraming, printedDpi, type Framing } from "@/lib/photo-framing";
 import {
   analyzePhoto,
@@ -213,8 +214,11 @@ function BookStudio() {
         ...photo,
         caption: captions[photo.id] ?? photo.caption,
         framing: framings[photo.id] ?? normalizeFraming(null),
+        // L'effet est une décision du livre : il vit dans la disposition, et
+        // l'album continue d'afficher la photo d'origine.
+        effect: layout?.effects?.[photo.id] ?? null,
       }));
-  }, [order, rawPhotos, captions, framings]);
+  }, [order, rawPhotos, captions, framings, layout]);
 
   // Un administrateur peut consulter et exporter l'album d'un client, mais la
   // RLS lui interdit d'y écrire. Sans ce test, les boutons d'édition seraient
@@ -292,11 +296,30 @@ function BookStudio() {
    * modifiable, au même rang, que la disposition ait été enregistrée ou
    * qu'elle vienne encore du découpage automatique.
    */
-  const shownLayout = useMemo(() => layoutFromPlan(plan, photoIds), [plan, photoIds]);
+  const shownLayout = useMemo(
+    () => layoutFromPlan(plan, photoIds, layout?.effects),
+    [plan, photoIds, layout?.effects],
+  );
 
   const applyLayout = (next: AlbumLayout) => {
     setLayout(next);
     setLayoutDirty(true);
+  };
+
+  /**
+   * Pose ou retire l'effet d'une photo.
+   *
+   * On part de la disposition affichée quand rien n'a encore été réarrangé :
+   * choisir un effet fige alors le découpage automatique, comme le fait déjà
+   * le moindre réglage de page.
+   */
+  const setPhotoEffect = (photoId: string, effectId: string | null) => {
+    const base = layout ?? shownLayout;
+    const effects = { ...(base.effects ?? {}) };
+    if (effectId) effects[photoId] = effectId;
+    else delete effects[photoId];
+    const { effects: _previous, ...rest } = base;
+    applyLayout({ ...rest, ...(Object.keys(effects).length > 0 ? { effects } : {}) });
   };
 
   /**
@@ -325,6 +348,49 @@ function BookStudio() {
               : " — nette à l’impression."}
           </p>
         ) : null}
+        <div>
+          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+            Effet
+          </span>
+          {/* Chaque vignette montre l'effet sur cette photo-là : on choisit sur
+              pièce, pas sur un nom. Ce que l'aperçu affiche est exactement ce
+              que le PDF cuira dans les pixels. */}
+          <div className="-mx-5 flex snap-x gap-2 overflow-x-auto px-5 pb-2">
+            {[{ id: null, label: "Aucun", hint: "La photo telle quelle." }, ...PHOTO_EFFECTS].map(
+              (effect) => {
+                const active = (photo.effect ?? null) === effect.id;
+                return (
+                  <button
+                    key={effect.id ?? "aucun"}
+                    type="button"
+                    onClick={() => setPhotoEffect(photo.id, effect.id)}
+                    title={effect.hint}
+                    aria-pressed={active}
+                    className={
+                      "w-[4.5rem] shrink-0 snap-start overflow-hidden rounded-xl border text-left transition-colors " +
+                      (active
+                        ? "border-terre ring-2 ring-terre/40"
+                        : "border-border hover:border-foreground/30")
+                    }
+                  >
+                    <img
+                      src={photo.thumbUrl || photo.signedUrl}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                      className="h-14 w-full object-cover"
+                      style={{ filter: effectFilter(effect.id) }}
+                    />
+                    <span className="block truncate px-1.5 py-1 text-[0.65rem] font-medium text-foreground">
+                      {effect.label}
+                    </span>
+                  </button>
+                );
+              },
+            )}
+          </div>
+        </div>
+
         <label className="block">
           <span className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
             Légende
@@ -462,12 +528,19 @@ function BookStudio() {
       await removePhoto({ data: { photoId, storagePath } });
 
       if (layout) {
-        const cleaned = {
+        // La photo quitte ses cases et emporte son effet. Reconstruire la
+        // disposition de zéro effacerait les effets des autres photos : on
+        // repart de l'existant.
+        const { [photoId]: _removed, ...keptEffects } = layout.effects ?? {};
+        const cleaned: AlbumLayout = {
+          ...layout,
           pages: layout.pages.map((page) => ({
             ...page,
             slots: page.slots.map((slot) => (slot === photoId ? null : slot)),
           })),
         };
+        if (Object.keys(keptEffects).length > 0) cleaned.effects = keptEffects;
+        else delete cleaned.effects;
         setLayout(cleaned);
         await saveLayout({ data: { albumId, layout: cleaned } });
       }
@@ -736,9 +809,10 @@ function BookStudio() {
           url: photo.printUrl as string,
           caption: photo.caption,
           framing: photo.framing,
+          effect: photo.effect,
         })),
         coverPhoto: coverPhoto
-          ? { id: coverPhoto.id, url: coverPhoto.printUrl as string }
+          ? { id: coverPhoto.id, url: coverPhoto.printUrl as string, effect: coverPhoto.effect }
           : undefined,
         coverTemplate: coverTemplateId,
         coverWallpaper,
@@ -849,6 +923,7 @@ function BookStudio() {
                 title={title}
                 subtitle={coverSubtitle}
                 photoUrl={coverPhoto?.signedUrl}
+                photoEffect={coverPhoto?.effect}
                 templateId={coverTemplateId}
                 wallpaper={coverWallpaper}
               />
@@ -1158,6 +1233,7 @@ function BookStudio() {
                 title={title}
                 subtitle={coverSubtitle}
                 photoUrl={coverPhoto?.signedUrl}
+                photoEffect={coverPhoto?.effect}
                 templateId={coverTemplateId}
                 wallpaper={coverWallpaper}
               />

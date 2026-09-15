@@ -1,5 +1,6 @@
 import type { BookPlan } from "@/lib/book-layout";
 import type { BookTheme } from "@/lib/book-themes";
+import { effectFilter } from "@/lib/photo-effects";
 import type { Framing } from "@/lib/photo-framing";
 import { slotKey, type SlotPosition } from "@/lib/use-slot-drag";
 import { findWallpaper, wallpaperScreenUrl, type Wallpaper } from "@/lib/wallpapers";
@@ -23,6 +24,8 @@ export interface ViewerPhoto {
   thumbUrl?: string | null;
   caption: string | null;
   framing: Framing;
+  /** Effet du livre (voir photo-effects.ts) ; `null` = la photo telle quelle. */
+  effect?: string | null;
 }
 
 /**
@@ -233,6 +236,8 @@ export function BookPages({
                               (editable ? " pointer-events-none [-webkit-touch-callout:none]" : "")
                             }
                             style={{
+                              // Le même filtre que celui cuit dans le PDF.
+                              filter: effectFilter(photo.effect),
                               objectFit: photo.framing.fit,
                               objectPosition:
                                 photo.framing.cropX * 100 + "% " + photo.framing.cropY * 100 + "%",
