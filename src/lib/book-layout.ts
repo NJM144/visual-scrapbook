@@ -9,6 +9,7 @@
 
 import { findFormat, normalizePageCount, type PrintFormat } from "./print-formats";
 import type { BookTheme } from "./book-themes";
+import { normalizeStickers, type PageSticker } from "./stickers";
 import { isTextBlock, normalizeTextBlock, type TextBlock } from "./text-blocks";
 
 /** Espace entre deux photos d'une même page. */
@@ -46,6 +47,13 @@ export interface PageStyle {
   paper?: string;
   wallpaper?: string | null;
   flow?: PageFlow;
+  /**
+   * Stickers posés sur la page, par-dessus les photos (voir stickers.ts).
+   *
+   * Ils appartiennent à la page et non à une case : un sticker se pose où il
+   * veut, quitte à chevaucher deux photos.
+   */
+  stickers?: PageSticker[];
 }
 
 export const PAGE_FLOWS: PageFlow[] = ["auto", "cote", "pile"];
@@ -261,6 +269,8 @@ export function pageStyleOf(page: PageStyle): PageStyle | undefined {
   if (page.paper !== undefined) style.paper = page.paper;
   if (page.wallpaper !== undefined) style.wallpaper = page.wallpaper;
   if (page.flow !== undefined && page.flow !== "auto") style.flow = page.flow;
+  const stickers = normalizeStickers(page.stickers);
+  if (stickers) style.stickers = stickers;
   return Object.keys(style).length > 0 ? style : undefined;
 }
 
@@ -274,6 +284,7 @@ function isPageStyle(page: PageStyle): boolean {
     return false;
   }
   if (page.flow !== undefined && !PAGE_FLOWS.includes(page.flow)) return false;
+  if (page.stickers !== undefined && !Array.isArray(page.stickers)) return false;
   return true;
 }
 

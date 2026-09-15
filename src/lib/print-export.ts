@@ -15,13 +15,21 @@
 import {
   PDFDocument,
   StandardFonts,
+  degrees,
   rgb,
   type PDFFont,
   type PDFPage,
   type PDFImage,
 } from "pdf-lib";
 import { strToU8, zipSync } from "fflate";
-import { BLEED_MM, MIN_PRINT_DPI, mmToPt, mmToPx, spineWidthMm } from "./print-formats";
+import {
+  BLEED_MM,
+  MIN_PRINT_DPI,
+  mmToPt,
+  mmToPx,
+  spineWidthMm,
+  type PrintFormat,
+} from "./print-formats";
 import { hexToRgb01, type BookTheme } from "./book-themes";
 import type { BookPlan } from "./book-layout";
 import {
@@ -32,6 +40,7 @@ import {
   resolveMotif,
 } from "./cover-templates";
 import { applyEffectToImageData, effectFilter, effectMatrix } from "./photo-effects";
+import { findSticker, stickerUrl, type PageSticker } from "./stickers";
 import { computePlacement, normalizeFraming, printedDpi, type Framing } from "./photo-framing";
 import {
   LINE_HEIGHT,
@@ -344,6 +353,65 @@ function drawOrnament(sheet: Sheet, theme: BookTheme, centerXMm: number, yMm: nu
   }
 }
 
+/**
+ * Pose les stickers d'une page, par-dessus les photos.
+ *
+ * Le PNG est embarqué tel quel : sa transparence est ce qui fait qu'un cœur
+ * posé sur une photo reste un cœur et non un carré blanc. Position et taille
+ * sont des fractions de la page — les mêmes qu'à l'écran, d'où le même rendu.
+ *
+ * pdf-lib fait tourner l'image autour de son coin bas-gauche ; on déplace donc
+ * ce coin pour que la rotation ait lieu autour du centre, comme le fait la
+ * transformation CSS de l'aperçu.
+ */
+async function drawStickers(
+  sheet: Sheet,
+  pdf: PDFDocument,
+  list: PageSticker[],
+  format: PrintFormat,
+  cache: Map<string, PDFImage>,
+) {
+  for (const sticker of list) {
+    const dessin = findSticker(sticker.id);
+    if (!dessin) continue;
+
+    let image = cache.get(sticker.id);
+    if (!image) {
+      const response = await fetch(stickerUrl(sticker.id));
+      if (!response.ok) continue;
+      image = await pdf.embedPng(await response.arrayBuffer());
+      cache.set(sticker.id, image);
+    }
+
+    const widthMm = sticker.size * format.widthMm;
+    const heightMm = widthMm / dessin.ratio;
+    const centerXMm = sticker.x * format.widthMm;
+    const centerYMm = sticker.y * format.heightMm;
+    const spot = place(sheet, centerXMm - widthMm / 2, centerYMm - heightMm / 2, widthMm, heightMm);
+
+    const angle = sticker.rot ?? 0;
+    if (angle === 0) {
+      sheet.page.drawImage(image, spot);
+      continue;
+    }
+
+    // Rotation autour du centre : on tourne le vecteur qui mène du centre au
+    // coin bas-gauche, et on repose l'image sur le coin ainsi déplacé.
+    const radians = (-angle * Math.PI) / 180;
+    const cx = spot.x + spot.width / 2;
+    const cy = spot.y + spot.height / 2;
+    const dx = -spot.width / 2;
+    const dy = -spot.height / 2;
+    sheet.page.drawImage(image, {
+      x: cx + dx * Math.cos(radians) - dy * Math.sin(radians),
+      y: cy + dx * Math.sin(radians) + dy * Math.cos(radians),
+      width: spot.width,
+      height: spot.height,
+      rotate: degrees(-angle),
+    });
+  }
+}
+
 /* ------------------------------------------------------------------ textes */
 
 function drawCentered(
@@ -533,6 +601,8 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   // posé sur toutes les pages qui l'emploient : un JPEG par papier dans le
   // fichier, pas un par page.
   const wallCache = new Map<string, PDFImage>();
+  /** Un sticker posé sur dix pages n'est embarqué qu'une fois. */
+  const stickerCache = new Map<string, PDFImage>();
   const wallFor = async (id: string, paper: string): Promise<PDFImage | null> => {
     const cached = wallCache.get(id);
     if (cached) return cached;
@@ -675,6 +745,10 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
         );
       }
       tick("Photo " + (slot.photoIndex + 1) + " / " + plan.photoCount);
+    }
+
+    if (bookPage.style?.stickers?.length) {
+      await drawStickers(sheet, interior, bookPage.style.stickers, format, stickerCache);
     }
 
     // Folio, sauf sur les pages liminaires.

@@ -1,6 +1,7 @@
 import type { BookPlan } from "@/lib/book-layout";
 import type { BookTheme } from "@/lib/book-themes";
 import { effectFilter } from "@/lib/photo-effects";
+import { findSticker, stickerUrl } from "@/lib/stickers";
 import { LINE_HEIGHT, TEXT_PADDING_MM, findTextSize } from "@/lib/text-blocks";
 import type { Framing } from "@/lib/photo-framing";
 import { slotKey, type SlotPosition } from "@/lib/use-slot-drag";
@@ -50,6 +51,17 @@ export interface BookEditControls {
   maxSlots: number;
   /** Ouvre les réglages propres à la page : couleur, papier peint, orientation. */
   onPageStyle: (photoPage: number, pageNumber: number) => void;
+  /** Ouvre le choix de stickers pour cette page. */
+  onStickers: (photoPage: number, pageNumber: number) => void;
+  /** Début d'un geste sur un sticker posé : appui long pour le déplacer. */
+  onStickerPointerDown: (
+    event: React.PointerEvent<HTMLElement>,
+    photoPage: number,
+    index: number,
+  ) => void;
+  /** Sticker soulevé et sticker armé, pour les montrer comme tels. */
+  draggingSticker: { page: number; index: number } | null;
+  selectedSticker: { page: number; index: number } | null;
 }
 
 /** Doit rester égal à CAPTION_BAND_MM dans print-export.ts. */
@@ -320,6 +332,55 @@ export function BookPages({
                 );
               })}
 
+              {/* Les stickers se posent après les photos : ils sont dessus, y
+                  compris à cheval sur deux cases. Position et taille sont des
+                  fractions de la page — elle tient en 15 comme en 30 cm. */}
+              {(page.style?.stickers ?? []).map((sticker, index) => {
+                const dessin = findSticker(sticker.id);
+                if (!dessin) return null;
+                const dragging =
+                  edit?.draggingSticker?.page === photoPage && edit.draggingSticker.index === index;
+                const selected =
+                  edit?.selectedSticker?.page === photoPage && edit.selectedSticker.index === index;
+
+                return (
+                  <img
+                    key={index}
+                    src={stickerUrl(sticker.id)}
+                    alt={editable ? dessin.label + ", appui long pour déplacer" : ""}
+                    draggable={false}
+                    loading="lazy"
+                    decoding="async"
+                    {...(editable
+                      ? {
+                          "data-sticker": index,
+                          onPointerDown: (event: React.PointerEvent<HTMLElement>) =>
+                            edit.onStickerPointerDown(event, photoPage, index),
+                          role: "button" as const,
+                          tabIndex: 0,
+                        }
+                      : { "aria-hidden": true })}
+                    className={
+                      "absolute select-none " +
+                      (editable ? "cursor-grab touch-manipulation " : "pointer-events-none ") +
+                      (dragging ? "opacity-30 " : "") +
+                      (selected ? "outline outline-2 outline-terre " : "")
+                    }
+                    style={{
+                      left: sticker.x * 100 + "%",
+                      top: sticker.y * 100 + "%",
+                      width: sticker.size * 100 + "%",
+                      // La hauteur suit le dessin : c'est la page, pas la case,
+                      // qui donne l'échelle des deux côtés.
+                      height:
+                        ((sticker.size * format.widthMm) / dessin.ratio / format.heightMm) * 100 +
+                        "%",
+                      transform: "translate(-50%, -50%) rotate(" + (sticker.rot ?? 0) + "deg)",
+                    }}
+                  />
+                );
+              })}
+
               {page.kind === "photos" &&
               page.slots.every((slot) => !photos[slot.photoIndex] && !slot.text) ? (
                 <span className="absolute inset-x-0 bottom-[14%] px-[12%] text-center text-xs text-black/35">
@@ -357,6 +418,14 @@ export function BookPages({
                     className="h-9 rounded-full border border-input px-3 text-xs text-foreground transition-colors hover:bg-muted"
                   >
                     Fond
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => edit.onStickers(photoPage, page.number)}
+                    aria-label={"Stickers de la page " + page.number}
+                    className="h-9 rounded-full border border-input px-3 text-xs text-foreground transition-colors hover:bg-muted"
+                  >
+                    Stickers
                   </button>
                   <button
                     type="button"

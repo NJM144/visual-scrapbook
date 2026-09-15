@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { BookPages, type ViewerPhoto } from "@/components/BookPages";
 import {
   MAX_SLOTS_PER_PAGE,
@@ -24,6 +24,17 @@ import {
   useSlotDrag,
   type SlotPosition,
 } from "@/lib/use-slot-drag";
+import {
+  DEFAULT_STICKER_SIZE,
+  MAX_STICKERS_PER_PAGE,
+  MAX_STICKER_SIZE,
+  MIN_STICKER_SIZE,
+  STICKERS,
+  STICKER_FAMILIES,
+  findSticker,
+  stickerUrl,
+  type PageSticker,
+} from "@/lib/stickers";
 import { WALLPAPERS, wallpaperScreenUrl, type Wallpaper } from "@/lib/wallpapers";
 
 /** Couleurs de fond proposées à la page ; le thème reste le premier choix. */
@@ -118,6 +129,26 @@ export function BookEditor({
   const [openText, setOpenText] = useState<SlotPosition | null>(null);
   /** Page dont les réglages sont ouverts : rang parmi les pages de photos, numéro imprimé. */
   const [openPage, setOpenPage] = useState<{ index: number; number: number } | null>(null);
+  /** Page dont le choix de stickers est ouvert. */
+  const [openStickers, setOpenStickers] = useState<{ index: number; number: number } | null>(null);
+  /** Sticker touché : son panneau de réglages est ouvert. */
+  const [openSticker, setOpenSticker] = useState<{ page: number; index: number } | null>(null);
+  /** Sticker soulevé, en cours de déplacement. */
+  const [draggingSticker, setDraggingSticker] = useState<{ page: number; index: number } | null>(
+    null,
+  );
+  const stickerPress = useRef<{
+    page: number;
+    index: number;
+    rect: DOMRect;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    active: boolean;
+    timer: number | null;
+    frame: number | null;
+    release: () => void;
+  } | null>(null);
 
   const photoById = new Map(photos.map((photo) => [photo.id, photo]));
   /** La vignette d'une case ; rien pour un paragraphe, qui n'est pas une image. */
@@ -150,6 +181,148 @@ export function BookEditor({
   const patchText = (position: SlotPosition, patch: Partial<TextBlock>) => {
     const current = textAt(position) ?? { text: "" };
     setSlotContent(position, { ...current, ...patch });
+  };
+
+  /* ------------------------------------------------------------- stickers */
+
+  const stickersOf = (pageIndex: number): PageSticker[] => layout.pages[pageIndex]?.stickers ?? [];
+
+  const setStickers = (pageIndex: number, list: PageSticker[]) => {
+    onLayoutChange({
+      pages: layout.pages.map((page, index) => {
+        if (index !== pageIndex) return page;
+        const { stickers: _anciens, ...rest } = page;
+        return list.length > 0 ? { ...rest, stickers: list } : rest;
+      }),
+    });
+  };
+
+  /** Pose un sticker au milieu de la page ; on le déplace ensuite au doigt. */
+  const addSticker = (pageIndex: number, id: string) => {
+    const list = stickersOf(pageIndex);
+    if (list.length >= MAX_STICKERS_PER_PAGE) return;
+    setStickers(pageIndex, [...list, { id, x: 0.5, y: 0.5, size: DEFAULT_STICKER_SIZE }]);
+  };
+
+  const patchSticker = (pageIndex: number, index: number, patch: Partial<PageSticker>) => {
+    setStickers(
+      pageIndex,
+      stickersOf(pageIndex).map((sticker, i) => (i === index ? { ...sticker, ...patch } : sticker)),
+    );
+  };
+
+  const removeSticker = (pageIndex: number, index: number) => {
+    setStickers(
+      pageIndex,
+      stickersOf(pageIndex).filter((_, i) => i !== index),
+    );
+  };
+
+  /**
+   * Geste sur un sticker déjà posé : appui long pour le déplacer, appui bref
+   * pour ouvrir ses réglages. Même convention que les photos — un doigt qui
+   * glisse sans attendre fait défiler la page, comme partout ailleurs.
+   */
+  const handleStickerPointerDown = (
+    event: React.PointerEvent<HTMLElement>,
+    pageIndex: number,
+    index: number,
+  ) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (stickerPress.current) return;
+
+    const pageElement = event.currentTarget.parentElement;
+    if (!pageElement) return;
+    if (event.pointerType === "mouse") event.preventDefault();
+
+    const activate = () => {
+      const press = stickerPress.current;
+      if (!press || press.active) return;
+      press.active = true;
+      if (press.timer !== null) window.clearTimeout(press.timer);
+      press.timer = null;
+      setDraggingSticker({ page: press.page, index: press.index });
+      if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(12);
+    };
+
+    const finish = () => {
+      const press = stickerPress.current;
+      if (press) {
+        if (press.timer !== null) window.clearTimeout(press.timer);
+        if (press.frame !== null) cancelAnimationFrame(press.frame);
+        press.release();
+      }
+      stickerPress.current = null;
+      setDraggingSticker(null);
+    };
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const press = stickerPress.current;
+      if (!press || moveEvent.pointerId !== press.pointerId) return;
+
+      if (!press.active) {
+        const distance = Math.hypot(
+          moveEvent.clientX - press.startX,
+          moveEvent.clientY - press.startY,
+        );
+        // À la souris, le glissement suffit ; au doigt, un déplacement avant
+        // l'appui long est un défilement de page.
+        if (moveEvent.pointerType === "mouse" && distance > 4) activate();
+        else if (moveEvent.pointerType !== "mouse" && distance > 12) finish();
+        return;
+      }
+
+      const { rect } = press;
+      const x = (moveEvent.clientX - rect.left) / rect.width;
+      const y = (moveEvent.clientY - rect.top) / rect.height;
+      // Une image par mouvement : déplacer un sticker redessine le livre.
+      if (press.frame !== null) cancelAnimationFrame(press.frame);
+      press.frame = requestAnimationFrame(() => {
+        patchSticker(press.page, press.index, {
+          x: Math.min(1.1, Math.max(-0.1, x)),
+          y: Math.min(1.1, Math.max(-0.1, y)),
+        });
+      });
+    };
+
+    const onUp = (upEvent: PointerEvent) => {
+      const press = stickerPress.current;
+      if (!press || upEvent.pointerId !== press.pointerId) return;
+      const wasActive = press.active;
+      const page = press.page;
+      const slotIndex = press.index;
+      finish();
+      if (!wasActive) setOpenSticker({ page, index: slotIndex });
+    };
+
+    const onCancel = (cancelEvent: PointerEvent) => {
+      if (cancelEvent.pointerId === stickerPress.current?.pointerId) finish();
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+
+    stickerPress.current = {
+      page: pageIndex,
+      index,
+      rect: pageElement.getBoundingClientRect(),
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+      timer: null,
+      frame: null,
+      release: () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onCancel);
+      },
+    };
+
+    if (event.pointerType !== "mouse") {
+      stickerPress.current.timer = window.setTimeout(activate, 250);
+    }
   };
 
   const drag = useSlotDrag({
@@ -283,6 +456,10 @@ export function BookEditor({
           onSlotCount: changeSlotCount,
           maxSlots: MAX_SLOTS_PER_PAGE,
           onPageStyle: (index, number) => setOpenPage({ index, number }),
+          onStickers: (index, number) => setOpenStickers({ index, number }),
+          onStickerPointerDown: handleStickerPointerDown,
+          draggingSticker,
+          selectedSticker: openSticker,
         }}
       />
 
@@ -509,6 +686,181 @@ export function BookEditor({
           </div>
         </div>
       ) : null}
+
+      {/* Le choix des stickers : on en pose autant qu'on veut, ils arrivent au
+          milieu de la page et se déplacent ensuite au doigt. */}
+      {openStickers ? (
+        <div className="fixed inset-0 z-[65] flex items-end justify-center sm:items-center">
+          <button
+            type="button"
+            aria-label="Fermer"
+            onClick={() => setOpenStickers(null)}
+            className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
+          />
+          <div className="relative max-h-[85svh] w-full overflow-y-auto rounded-t-3xl border border-border bg-card p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl sm:max-w-lg sm:rounded-3xl sm:pb-5">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground">
+                  Stickers — page {openStickers.number}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Touchez un sticker pour le poser. Ensuite, appui long sur la page pour le
+                  déplacer, appui bref pour le régler.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpenStickers(null)}
+                aria-label="Fermer"
+                className="size-11 shrink-0 rounded-full border border-input text-sm transition-colors hover:bg-muted"
+              >
+                ✕
+              </button>
+            </div>
+
+            {stickersOf(openStickers.index).length >= MAX_STICKERS_PER_PAGE ? (
+              <p className="mb-3 rounded-xl bg-muted px-4 py-3 text-xs text-muted-foreground">
+                Cette page en porte déjà {MAX_STICKERS_PER_PAGE} : au-delà, on ne voit plus les
+                photos. Retirez-en un pour en poser un autre.
+              </p>
+            ) : null}
+
+            {STICKER_FAMILIES.map((family) => {
+              const dessins = STICKERS.filter((sticker) => sticker.family === family.id);
+              if (dessins.length === 0) return null;
+              return (
+                <div key={family.id} className="mb-4">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+                    {family.label}
+                  </p>
+                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                    {dessins.map((sticker) => (
+                      <button
+                        key={sticker.id}
+                        type="button"
+                        title={sticker.label}
+                        aria-label={sticker.label}
+                        disabled={stickersOf(openStickers.index).length >= MAX_STICKERS_PER_PAGE}
+                        onClick={() => addSticker(openStickers.index, sticker.id)}
+                        className="flex aspect-square items-center justify-center rounded-2xl border border-border p-2 transition-colors hover:border-foreground/30 hover:bg-muted disabled:opacity-40"
+                      >
+                        <img
+                          src={stickerUrl(sticker.id)}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={() => setOpenStickers(null)}
+              className="mt-2 h-11 w-full rounded-full bg-terre px-4 text-sm font-medium text-white transition-colors hover:bg-terre/90"
+            >
+              Terminé
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Un sticker posé : sa taille, son inclinaison, et de quoi le retirer. */}
+      {openSticker && stickersOf(openSticker.page)[openSticker.index]
+        ? (() => {
+            const pose = stickersOf(openSticker.page)[openSticker.index]!;
+            const dessin = findSticker(pose.id);
+            return (
+              <div className="fixed inset-0 z-[65] flex items-end justify-center sm:items-center">
+                <button
+                  type="button"
+                  aria-label="Fermer"
+                  onClick={() => setOpenSticker(null)}
+                  className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
+                />
+                <div className="relative max-h-[85svh] w-full overflow-y-auto rounded-t-3xl border border-border bg-card p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl sm:max-w-lg sm:rounded-3xl sm:pb-5">
+                  <div className="mb-5 flex items-center gap-3">
+                    <span className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-muted p-2">
+                      <img
+                        src={stickerUrl(pose.id)}
+                        alt=""
+                        className="max-h-full max-w-full object-contain"
+                        style={{ transform: "rotate(" + (pose.rot ?? 0) + "deg)" }}
+                      />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground">
+                        {dessin?.label ?? "Sticker"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Appui long sur le sticker pour le déplacer dans la page.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setOpenSticker(null)}
+                      aria-label="Fermer"
+                      className="size-11 shrink-0 rounded-full border border-input text-sm transition-colors hover:bg-muted"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+                      Taille — {Math.round(pose.size * 100)} % de la page
+                    </span>
+                    <input
+                      type="range"
+                      min={Math.round(MIN_STICKER_SIZE * 100)}
+                      max={Math.round(MAX_STICKER_SIZE * 100)}
+                      value={Math.round(pose.size * 100)}
+                      onChange={(event) =>
+                        patchSticker(openSticker.page, openSticker.index, {
+                          size: Number(event.target.value) / 100,
+                        })
+                      }
+                      className="h-11 w-full accent-terre"
+                    />
+                  </label>
+
+                  <label className="mt-3 block">
+                    <span className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+                      Inclinaison — {pose.rot ?? 0}°
+                    </span>
+                    <input
+                      type="range"
+                      min={-45}
+                      max={45}
+                      value={pose.rot ?? 0}
+                      onChange={(event) =>
+                        patchSticker(openSticker.page, openSticker.index, {
+                          rot: Number(event.target.value),
+                        })
+                      }
+                      className="h-11 w-full accent-terre"
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      removeSticker(openSticker.page, openSticker.index);
+                      setOpenSticker(null);
+                    }}
+                    className="mt-5 h-11 w-full rounded-full border border-input px-4 text-sm text-destructive transition-colors hover:bg-destructive/10"
+                  >
+                    Retirer ce sticker
+                  </button>
+                </div>
+              </div>
+            );
+          })()
+        : null}
 
       {/* Ce qu'une page décide pour elle-même : sa couleur, son papier peint,
           l'orientation de ses photos. Tout y est réversible : « Thème » et

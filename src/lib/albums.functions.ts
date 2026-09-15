@@ -747,6 +747,19 @@ export const updateAlbumLayout = createServerFn({ method: "POST" })
                     .optional(),
                   wallpaper: z.string().min(1).max(60).nullable().optional(),
                   flow: z.enum(["auto", "cote", "pile"]).optional(),
+                  // Stickers posés sur la page (voir stickers.ts).
+                  stickers: z
+                    .array(
+                      z.object({
+                        id: z.string().min(1).max(40),
+                        x: z.number(),
+                        y: z.number(),
+                        size: z.number(),
+                        rot: z.number().optional(),
+                      }),
+                    )
+                    .max(12)
+                    .optional(),
                 }),
               )
               .max(300),
