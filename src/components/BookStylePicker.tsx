@@ -3,7 +3,7 @@ import { PRINT_FORMATS, findFormat } from "@/lib/print-formats";
 import { COVER_TEMPLATES } from "@/lib/cover-templates";
 import { CoverPreview } from "@/components/CoverPreview";
 import { WALLPAPERS, findWallpaper, wallpaperScreenUrl } from "@/lib/wallpapers";
-import { TEXT_STYLES, findTextStyle, resolveInk } from "@/lib/text-styles";
+import { INK_PALETTE, TEXT_STYLES, findTextStyle, resolveInk } from "@/lib/text-styles";
 
 /**
  * Coffret et thème : ce que l'on choisit avant tout le reste.
@@ -358,20 +358,6 @@ function WallpaperStrip({
     </div>
   );
 }
-
-/** Palette d'encres : des tons qui tiennent à l'impression, plus le choix libre. */
-const INK_PALETTE: { hex: string; label: string }[] = [
-  { hex: "#141414", label: "Encre" },
-  { hex: "#3A2418", label: "Brun" },
-  { hex: "#1E5B3A", label: "Forêt" },
-  { hex: "#141B33", label: "Nuit" },
-  { hex: "#7A2E22", label: "Brique" },
-  { hex: "#B8562F", label: "Terre cuite" },
-  { hex: "#C2A377", label: "Ocre" },
-  { hex: "#6B7280", label: "Ardoise" },
-  { hex: "#FBF6EE", label: "Crème" },
-  { hex: "#FFFFFF", label: "Blanc" },
-];
 
 function InkPicker({
   label,

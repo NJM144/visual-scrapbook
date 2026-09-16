@@ -72,6 +72,26 @@ export const TEXT_STYLES: TextStyle[] = [
 
 export const DEFAULT_TEXT_STYLE = "classique";
 
+/**
+ * Encres proposées : des tons qui tiennent à l'impression.
+ *
+ * Ce sont des couleurs de *texte*, pas de papier : elles doivent rester
+ * lisibles sur un fond clair, sauf les deux dernières, faites pour un fond
+ * sombre ou une photo.
+ */
+export const INK_PALETTE: { hex: string; label: string }[] = [
+  { hex: "#141414", label: "Encre" },
+  { hex: "#3A2418", label: "Brun" },
+  { hex: "#1E5B3A", label: "Forêt" },
+  { hex: "#141B33", label: "Nuit" },
+  { hex: "#7A2E22", label: "Brique" },
+  { hex: "#B8562F", label: "Terre cuite" },
+  { hex: "#C2A377", label: "Ocre" },
+  { hex: "#6B7280", label: "Ardoise" },
+  { hex: "#FBF6EE", label: "Crème" },
+  { hex: "#FFFFFF", label: "Blanc" },
+];
+
 const BY_ID = new Map(TEXT_STYLES.map((style) => [style.id, style]));
 
 /**

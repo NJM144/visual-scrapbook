@@ -19,6 +19,7 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { useAuth } from "@/hooks/use-auth";
 import { CREDITS } from "@/lib/gallery";
+import { EMOJI_CREDIT } from "@/lib/stickers";
 import { getIsAdmin } from "@/lib/albums.functions";
 
 function NotFoundComponent() {
@@ -389,6 +390,18 @@ function PhotoCredits() {
           </span>
         ))}
         . Via Wikimedia Commons.
+      </p>
+      <p className="mt-2 text-xs leading-relaxed text-muted-foreground/70">
+        {EMOJI_CREDIT} — via{" "}
+        <a
+          href="https://github.com/jdecked/twemoji"
+          target="_blank"
+          rel="noreferrer"
+          className="underline underline-offset-2 transition-colors hover:text-foreground"
+        >
+          Twemoji
+        </a>
+        . Les autres stickers sont dessinés pour PhotoZo.
       </p>
     </div>
   );

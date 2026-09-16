@@ -48,6 +48,10 @@ export interface BookEditControls {
   selectedKey: string | null;
   onInsertAfter: (photoPage: number) => void;
   onRemovePage: (photoPage: number) => void;
+  /** Déplace la page d'un rang : -1 vers le début, +1 vers la fin. */
+  onMovePage: (photoPage: number, delta: number) => void;
+  /** Nombre de pages de photos, pour savoir laquelle est la dernière. */
+  photoPageCount: number;
   /** Ajoute ou retire un emplacement sur la page. */
   onSlotCount: (photoPage: number, delta: number) => void;
   maxSlots: number;
@@ -135,6 +139,12 @@ export function BookPages({
         const editable = edit && page.kind === "photos" && photoPage >= 0;
         // Ce que la page décide pour elle-même passe avant le thème et le livre.
         const paper = page.style?.paper ?? theme.paper;
+        // Idem pour l'écriture et l'encre : la page d'abord, l'album ensuite.
+        const ecriturePage = page.style?.font
+          ? findTextStyle(page.style.font, theme.font)
+          : ecriture;
+        const encrePage = page.style?.ink ?? encre;
+        const encreDiscretePage = page.style?.ink ?? encreDiscrete;
         const pageWallpaper =
           page.style?.wallpaper === undefined ? wallpaper : findWallpaper(page.style.wallpaper);
 
@@ -148,11 +158,11 @@ export function BookPages({
               style={{
                 aspectRatio: format.widthMm + " / " + format.heightMm,
                 backgroundColor: paper,
-                color: encre,
-                fontFamily: ecriture.css,
+                color: encrePage,
+                fontFamily: ecriturePage.css,
                 // Une manuscrite paraît plus petite à corps égal : le facteur
                 // du catalogue rattrape l'écart, ici comme dans le PDF.
-                fontSize: ecriture.scale * 100 + "%",
+                fontSize: ecriturePage.scale * 100 + "%",
               }}
             >
               {/* Le papier peint d'abord : tout ce qui suit se pose dessus. */}
@@ -176,7 +186,7 @@ export function BookPages({
                   {subtitle ? (
                     <span
                       className="mt-2 text-[clamp(0.55rem,2cqw,0.75rem)] italic"
-                      style={{ color: encreDiscrete }}
+                      style={{ color: encreDiscretePage }}
                     >
                       {subtitle}
                     </span>
@@ -191,7 +201,7 @@ export function BookPages({
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-[4%] px-[12%] text-center">
                   <span
                     className="text-[clamp(0.5rem,1.9cqw,0.72rem)] uppercase tracking-[0.2em]"
-                    style={{ color: encreDiscrete }}
+                    style={{ color: encreDiscretePage }}
                   >
                     Carnet de route
                   </span>
@@ -205,7 +215,7 @@ export function BookPages({
                   {roadbook?.places.length ? (
                     <span
                       className="text-balance text-[clamp(0.55rem,2.1cqw,0.85rem)] leading-relaxed"
-                      style={{ color: encreDiscrete }}
+                      style={{ color: encreDiscretePage }}
                     >
                       {roadbook.places.join(" · ")}
                     </span>
@@ -221,7 +231,7 @@ export function BookPages({
               {page.kind === "colophon" ? (
                 <div
                   className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-center text-[clamp(0.5rem,1.9cqw,0.7rem)]"
-                  style={{ color: encreDiscrete }}
+                  style={{ color: encreDiscretePage }}
                 >
                   <span className="italic">{dateLabel}</span>
                   <span>{plan.photoCount} photographies</span>
@@ -324,7 +334,7 @@ export function BookPages({
                         {caption ? (
                           <span
                             className="block truncate pt-[2%] text-center text-[clamp(0.4rem,1.5cqw,0.6rem)] italic"
-                            style={{ color: encre }}
+                            style={{ color: encrePage }}
                           >
                             {caption}
                           </span>
@@ -349,7 +359,7 @@ export function BookPages({
                             lineHeight: LINE_HEIGHT,
                             padding: (TEXT_PADDING_MM / slot.widthMm) * 100 + "%",
                             textAlign: block.align === "centre" ? "center" : "left",
-                            color: encre,
+                            color: encrePage,
                           }}
                         >
                           {block.text}
@@ -446,7 +456,7 @@ export function BookPages({
                   className="absolute inset-x-0 text-center text-[clamp(0.35rem,1.3cqw,0.55rem)]"
                   style={{
                     bottom: pct(theme.photoMarginMm / 3, format.heightMm),
-                    color: encreDiscrete,
+                    color: encreDiscretePage,
                   }}
                 >
                   {page.number}
@@ -472,7 +482,7 @@ export function BookPages({
                     aria-label={"Réglages de la page " + page.number}
                     className="h-9 rounded-full border border-input px-3 text-xs text-foreground transition-colors hover:bg-muted"
                   >
-                    Fond
+                    Style
                   </button>
                   <button
                     type="button"
@@ -499,6 +509,27 @@ export function BookPages({
                     className="size-9 rounded-full border border-input text-foreground transition-colors hover:bg-muted disabled:opacity-40"
                   >
                     +
+                  </button>
+                  {/* Déplacer la page : deux flèches plutôt qu'un glissement.
+                      Une page entière qu'on promène au doigt sur un téléphone,
+                      c'est le geste des photos en plus gros — et en moins sûr. */}
+                  <button
+                    type="button"
+                    onClick={() => edit.onMovePage(photoPage, -1)}
+                    disabled={photoPage === 0}
+                    aria-label={"Déplacer la page " + page.number + " vers le début"}
+                    className="size-9 rounded-full border border-input text-foreground transition-colors hover:bg-muted disabled:opacity-40"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => edit.onMovePage(photoPage, 1)}
+                    disabled={photoPage >= edit.photoPageCount - 1}
+                    aria-label={"Déplacer la page " + page.number + " vers la fin"}
+                    className="size-9 rounded-full border border-input text-foreground transition-colors hover:bg-muted disabled:opacity-40"
+                  >
+                    ↓
                   </button>
                   <button
                     type="button"

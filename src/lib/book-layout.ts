@@ -63,6 +63,15 @@ export interface PageStyle {
   wallpaper?: string | null;
   flow?: PageFlow;
   /**
+   * Écriture et couleur du texte de cette page (voir text-styles.ts).
+   *
+   * Absentes, la page suit l'album — c'est le cas courant : une écriture qui
+   * change à chaque page n'est plus une écriture. Mais une page de titre
+   * manuscrite au milieu d'un livre classique, elle, se défend.
+   */
+  font?: string;
+  ink?: string;
+  /**
    * Stickers posés sur la page, par-dessus les photos (voir stickers.ts).
    *
    * Ils appartiennent à la page et non à une case : un sticker se pose où il
@@ -290,6 +299,8 @@ export function pageStyleOf(page: PageStyle): PageStyle | undefined {
   if (page.paper !== undefined) style.paper = page.paper;
   if (page.wallpaper !== undefined) style.wallpaper = page.wallpaper;
   if (page.flow !== undefined && page.flow !== "auto") style.flow = page.flow;
+  if (page.font !== undefined) style.font = page.font;
+  if (page.ink !== undefined) style.ink = page.ink;
   const stickers = normalizeStickers(page.stickers);
   if (stickers) style.stickers = stickers;
   return Object.keys(style).length > 0 ? style : undefined;
@@ -306,6 +317,8 @@ function isPageStyle(page: PageStyle): boolean {
   }
   if (page.flow !== undefined && !PAGE_FLOWS.includes(page.flow)) return false;
   if (page.stickers !== undefined && !Array.isArray(page.stickers)) return false;
+  if (page.font !== undefined && typeof page.font !== "string") return false;
+  if (page.ink !== undefined && !/^#[0-9a-fA-F]{6}$/.test(page.ink)) return false;
   return true;
 }
 

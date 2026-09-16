@@ -834,6 +834,12 @@ export const updateAlbumLayout = createServerFn({ method: "POST" })
                     .optional(),
                   wallpaper: z.string().min(1).max(60).nullable().optional(),
                   flow: z.enum(["auto", "cote", "pile"]).optional(),
+                  // Écriture et couleur du texte propres à la page.
+                  font: z.string().min(1).max(40).optional(),
+                  ink: z
+                    .string()
+                    .regex(/^#[0-9a-fA-F]{6}$/)
+                    .optional(),
                   // Stickers posés sur la page (voir stickers.ts).
                   stickers: z
                     .array(

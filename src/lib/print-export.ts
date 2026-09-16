@@ -680,6 +680,23 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   /** Corps corrigé : une manuscrite se pose plus grande qu'un romain. */
   const corps = (size: number) => size * ecriture.scale;
 
+  /**
+   * L'écriture d'une page, quand elle en choisit une autre que celle du livre.
+   *
+   * Chaque police n'est embarquée qu'une fois, même si dix pages la
+   * demandent : un fichier d'impression n'a pas à porter dix copies d'une
+   * manuscrite.
+   */
+  const ecrituresParStyle = new Map<string, Ecriture>([[style.id, ecriture]]);
+  const ecritureDe = async (id: string | undefined): Promise<Ecriture> => {
+    if (!id || id === style.id) return ecriture;
+    const connue = ecrituresParStyle.get(id);
+    if (connue) return connue;
+    const embarquee = await embedTextStyle(interior, findTextStyle(id, theme.font), theme.font);
+    ecrituresParStyle.set(id, embarquee);
+    return embarquee;
+  };
+
   // Chaque papier peint est rendu une seule fois, fond perdu compris, puis
   // posé sur toutes les pages qui l'emploient : un JPEG par papier dans le
   // fichier, pas un par page.
@@ -705,6 +722,13 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
 
   for (const bookPage of plan.pages) {
     const sheet = addSheet(interior, format.widthMm, format.heightMm);
+    // Ce que la page décide passe avant le livre, comme à l'écran.
+    const ecriturePage = await ecritureDe(bookPage.style?.font);
+    const bodyPage = ecriturePage.body;
+    const italicPage = ecriturePage.italic;
+    const corpsPage = (size: number) => size * ecriturePage.scale;
+    const encrePage = bookPage.style?.ink ?? encre;
+    const encreDiscretePage = bookPage.style?.ink ?? encreDiscrete;
     // Ce que la page décide pour elle-même passe avant le thème et le livre.
     const paper = bookPage.style?.paper ?? theme.paper;
     const wallpaperId =
@@ -721,28 +745,36 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
     if (bookPage.kind === "titre") {
       drawCentered(
         sheet,
-        fitText(meta.title, body, corps(26), mmToPt(format.widthMm - 30)),
-        body,
-        corps(26),
+        fitText(meta.title, bodyPage, corpsPage(26), mmToPt(format.widthMm - 30)),
+        bodyPage,
+        corpsPage(26),
         format.heightMm * 0.42,
         format.widthMm,
-        encre,
+        encrePage,
       );
       if (meta.subtitle) {
         drawCentered(
           sheet,
-          fitText(meta.subtitle, italic, corps(12), mmToPt(format.widthMm - 30)),
-          italic,
-          corps(12),
+          fitText(meta.subtitle, italicPage, corpsPage(12), mmToPt(format.widthMm - 30)),
+          italicPage,
+          corpsPage(12),
           format.heightMm * 0.42 + 12,
           format.widthMm,
-          encreDiscrete,
+          encreDiscretePage,
         );
       }
     } else if (bookPage.kind === "carnet") {
       const carnet = options.roadbook;
       let y = format.heightMm * 0.34;
-      drawCentered(sheet, "CARNET DE ROUTE", body, corps(9), y, format.widthMm, encreDiscrete);
+      drawCentered(
+        sheet,
+        "CARNET DE ROUTE",
+        bodyPage,
+        corpsPage(9),
+        y,
+        format.widthMm,
+        encreDiscretePage,
+      );
 
       if (carnet?.from) {
         const debut = formatTakenAt(carnet.from);
@@ -751,12 +783,12 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
         y += 14;
         drawCentered(
           sheet,
-          fitText(periode, body, corps(15), mmToPt(format.widthMm - 30)),
-          body,
-          corps(15),
+          fitText(periode, bodyPage, corpsPage(15), mmToPt(format.widthMm - 30)),
+          bodyPage,
+          corpsPage(15),
           y,
           format.widthMm,
-          encre,
+          encrePage,
         );
       }
 
@@ -766,12 +798,12 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
         y += 9;
         drawCentered(
           sheet,
-          fitText(lieu, italic, corps(10), mmToPt(format.widthMm - 30)),
-          italic,
-          corps(10),
+          fitText(lieu, italicPage, corpsPage(10), mmToPt(format.widthMm - 30)),
+          italicPage,
+          corpsPage(10),
           y,
           format.widthMm,
-          encreDiscrete,
+          encreDiscretePage,
         );
       }
 
@@ -780,37 +812,44 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
         drawCentered(
           sheet,
           carnet.photoCount + " photographie" + (carnet.photoCount > 1 ? "s" : ""),
-          italic,
-          corps(9),
+          italicPage,
+          corpsPage(9),
           y,
           format.widthMm,
-          encreDiscrete,
+          encreDiscretePage,
         );
       }
     } else if (bookPage.kind === "colophon") {
       drawCentered(
         sheet,
         meta.dateLabel,
-        italic,
+        italicPage,
         10,
         format.heightMm * 0.5,
         format.widthMm,
-        encreDiscrete,
+        encreDiscretePage,
       );
       drawCentered(
         sheet,
         plan.photoCount + " photographies",
-        body,
+        bodyPage,
         9,
         format.heightMm * 0.5 + 8,
         format.widthMm,
-        encreDiscrete,
+        encreDiscretePage,
       );
     }
 
     for (const slot of bookPage.slots) {
       if (slot.text) {
-        const { dropped } = drawTextBlock(sheet, slot, slot.text, body, encre, ecriture.scale);
+        const { dropped } = drawTextBlock(
+          sheet,
+          slot,
+          slot.text,
+          bodyPage,
+          encrePage,
+          ecriturePage.scale,
+        );
         if (dropped > 0) {
           warnings.push(
             "Page " +
@@ -843,8 +882,8 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
       sheet.page.drawImage(image, place(sheet, slot.xMm, slot.yMm, slot.widthMm, imageHeight));
 
       if (caption) {
-        const size = corps(7.5);
-        const text = fitText(safeText(caption, italic), italic, size, mmToPt(slot.widthMm));
+        const size = corpsPage(7.5);
+        const text = fitText(safeText(caption, italicPage), italicPage, size, mmToPt(slot.widthMm));
         const textWidthMm = (italic.widthOfTextAtSize(text, size) / 72) * 25.4;
         const p = place(
           sheet,
@@ -853,7 +892,13 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
           0,
           0,
         );
-        sheet.page.drawText(text, { x: p.x, y: p.y, size, font: italic, color: color(encre) });
+        sheet.page.drawText(text, {
+          x: p.x,
+          y: p.y,
+          size,
+          font: italicPage,
+          color: color(encrePage),
+        });
       }
 
       // Même calcul que le badge du studio : l'écran a déjà prévenu de ce chiffre.
@@ -887,11 +932,11 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
       drawCentered(
         sheet,
         String(bookPage.number),
-        body,
-        corps(8),
+        bodyPage,
+        corpsPage(8),
         format.heightMm - theme.photoMarginMm / 2 - 1,
         format.widthMm,
-        encreDiscrete,
+        encreDiscretePage,
       );
     }
   }
@@ -1147,6 +1192,21 @@ function buildSpecSheet(
     "  navigateur, qui ne sait pas produire de CMJN. Merci de convertir.",
     "",
   ];
+
+  // Les dessins Twemoji sont sous licence CC-BY : citer leur origine fait
+  // partie du droit de les imprimer. La mention ne s'écrit que si le livre en
+  // porte — inutile d'encombrer la fiche autrement.
+  const emojiUtilises = plan.pages.some((page) =>
+    (page.style?.stickers ?? []).some((sticker) => sticker.id.startsWith("emoji-")),
+  );
+  if (emojiUtilises) {
+    lines.push(
+      "CREDITS",
+      "  Emoji : Twemoji, (c) Twitter Inc. et contributeurs, licence CC-BY 4.0",
+      "  https://github.com/jdecked/twemoji",
+      "",
+    );
+  }
 
   if (warnings.length > 0) {
     lines.push("POINTS DE VIGILANCE", ...warnings.map((w) => "  - " + w), "");

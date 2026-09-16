@@ -26,6 +26,7 @@ import {
   type SlotPosition,
 } from "@/lib/use-slot-drag";
 import {
+  EMOJI_CREDIT,
   DEFAULT_STICKER_SIZE,
   MAX_STICKERS_PER_PAGE,
   MAX_STICKER_SIZE,
@@ -36,7 +37,7 @@ import {
   stickerUrl,
   type PageSticker,
 } from "@/lib/stickers";
-import type { TextStyle } from "@/lib/text-styles";
+import { INK_PALETTE, TEXT_STYLES, findTextStyle, type TextStyle } from "@/lib/text-styles";
 import { WALLPAPERS, wallpaperScreenUrl, type Wallpaper } from "@/lib/wallpapers";
 
 /** Couleurs de fond proposées à la page ; le thème reste le premier choix. */
@@ -70,17 +71,23 @@ interface PageStylePatch {
   paper?: string | undefined;
   wallpaper?: string | null | undefined;
   flow?: PageFlow | undefined;
+  font?: string | undefined;
+  ink?: string | undefined;
 }
 
 function mergeStyle(page: AlbumLayout["pages"][number], patch: PageStylePatch) {
-  const { paper, wallpaper, flow, ...rest } = page;
+  const { paper, wallpaper, flow, font, ink, ...rest } = page;
   const next: PageStyle = {};
   const nextPaper = "paper" in patch ? patch.paper : paper;
   const nextWallpaper = "wallpaper" in patch ? patch.wallpaper : wallpaper;
   const nextFlow = "flow" in patch ? patch.flow : flow;
+  const nextFont = "font" in patch ? patch.font : font;
+  const nextInk = "ink" in patch ? patch.ink : ink;
   if (nextPaper !== undefined) next.paper = nextPaper;
   if (nextWallpaper !== undefined) next.wallpaper = nextWallpaper;
   if (nextFlow !== undefined && nextFlow !== "auto") next.flow = nextFlow;
+  if (nextFont !== undefined) next.font = nextFont;
+  if (nextInk !== undefined) next.ink = nextInk;
   return { ...rest, ...next };
 }
 
@@ -143,6 +150,8 @@ export function BookEditor({
   const [openStickers, setOpenStickers] = useState<{ index: number; number: number } | null>(null);
   /** Sticker touché : son panneau de réglages est ouvert. */
   const [openSticker, setOpenSticker] = useState<{ page: number; index: number } | null>(null);
+  /** Ce qui est tapé dans la recherche de stickers. */
+  const [stickerSearch, setStickerSearch] = useState("");
   /** Sticker soulevé, en cours de déplacement. */
   const [draggingSticker, setDraggingSticker] = useState<{ page: number; index: number } | null>(
     null,
@@ -362,6 +371,25 @@ export function BookEditor({
     setOpenPhoto(null);
   };
 
+  /**
+   * Déplace une page d'un rang.
+   *
+   * Les stickers et les réglages suivent la page : ils lui appartiennent, pas
+   * à sa position. Une sélection en cours est levée — elle désignait une case
+   * par son rang, qui vient de changer.
+   */
+  const movePage = (photoPage: number, delta: number) => {
+    const cible = photoPage + delta;
+    if (cible < 0 || cible >= layout.pages.length) return;
+    const pages = [...layout.pages];
+    const [page] = pages.splice(photoPage, 1);
+    if (!page) return;
+    pages.splice(cible, 0, page);
+    onLayoutChange({ ...layout, pages });
+    drag.setSelected(null);
+    setOpenSticker(null);
+  };
+
   const insertPageAfter = (photoPage: number) => {
     onLayoutChange({
       ...layout,
@@ -428,7 +456,12 @@ export function BookEditor({
   const applyStyleToAll = (index: number) => {
     const source = layout.pages[index];
     if (!source) return;
-    const patch: PageStylePatch = { paper: source.paper, wallpaper: source.wallpaper };
+    const patch: PageStylePatch = {
+      paper: source.paper,
+      wallpaper: source.wallpaper,
+      font: source.font,
+      ink: source.ink,
+    };
     onLayoutChange({ ...layout, pages: layout.pages.map((page) => mergeStyle(page, patch)) });
   };
 
@@ -470,6 +503,8 @@ export function BookEditor({
           selectedKey: drag.selected ? slotKey(drag.selected) : null,
           onInsertAfter: insertPageAfter,
           onRemovePage: removePage,
+          onMovePage: movePage,
+          photoPageCount: layout.pages.length,
           onSlotCount: changeSlotCount,
           maxSlots: MAX_SLOTS_PER_PAGE,
           onPageStyle: (index, number) => setOpenPage({ index, number }),
@@ -765,8 +800,37 @@ export function BookEditor({
               </p>
             ) : null}
 
+            {/* Recherche : les emoji se cherchent par leur nom (« cœur »,
+                « gâteau ») autant que par le caractère lui-même, tous deux
+                présents dans l'étiquette. */}
+            <label className="mb-4 flex h-11 items-center gap-2 rounded-full border border-input bg-background px-4">
+              <span aria-hidden>🔎</span>
+              <input
+                type="search"
+                value={stickerSearch}
+                onChange={(event) => setStickerSearch(event.target.value)}
+                placeholder="Chercher : cœur, gâteau, palmier…"
+                className="h-full flex-1 bg-transparent text-base outline-none"
+              />
+              {stickerSearch ? (
+                <button
+                  type="button"
+                  onClick={() => setStickerSearch("")}
+                  aria-label="Effacer la recherche"
+                  className="text-sm text-muted-foreground"
+                >
+                  ✕
+                </button>
+              ) : null}
+            </label>
+
             {STICKER_FAMILIES.map((family) => {
-              const dessins = STICKERS.filter((sticker) => sticker.family === family.id);
+              const recherche = stickerSearch.trim().toLowerCase();
+              const dessins = STICKERS.filter(
+                (sticker) =>
+                  sticker.family === family.id &&
+                  (recherche === "" || sticker.label.toLowerCase().includes(recherche)),
+              );
               if (dessins.length === 0) return null;
               return (
                 <div key={family.id} className="mb-4">
@@ -797,6 +861,19 @@ export function BookEditor({
                 </div>
               );
             })}
+
+            {stickerSearch.trim() &&
+            !STICKERS.some((sticker) =>
+              sticker.label.toLowerCase().includes(stickerSearch.trim().toLowerCase()),
+            ) ? (
+              <p className="mb-4 rounded-xl bg-muted px-4 py-3 text-xs text-muted-foreground">
+                Rien pour « {stickerSearch.trim()} ». Essayez un autre mot, ou effacez la recherche.
+              </p>
+            ) : null}
+
+            <p className="mb-4 text-[0.7rem] leading-relaxed text-muted-foreground/70">
+              {EMOJI_CREDIT}.
+            </p>
 
             <button
               type="button"
@@ -931,7 +1008,8 @@ export function BookEditor({
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-foreground">Page {openPage.number}</p>
                 <p className="text-xs text-muted-foreground">
-                  Couleur, papier peint et orientation des photos, pour cette page seulement.
+                  Fond, orientation des photos, écriture et couleur du texte — pour cette page
+                  seulement.
                 </p>
               </div>
               <button
@@ -1089,12 +1167,103 @@ export function BookEditor({
               </p>
             ) : null}
 
+            <p className="mt-6 mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+              Écriture de cette page
+            </p>
+            {/* L'album donne le ton ; une page peut s'en écarter — une page de
+                titre manuscrite au milieu d'un livre classique, par exemple. */}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setPageStyle(openPage.index, { font: undefined })}
+                className={
+                  "h-10 rounded-full border px-4 text-sm transition-colors " +
+                  (pageOpen.font === undefined
+                    ? "border-terre bg-terre/10 text-foreground"
+                    : "border-input text-foreground hover:bg-muted")
+                }
+              >
+                Comme le livre
+              </button>
+              {TEXT_STYLES.map((style) => (
+                <button
+                  key={style.id}
+                  type="button"
+                  onClick={() => setPageStyle(openPage.index, { font: style.id })}
+                  style={{ fontFamily: style.css }}
+                  className={
+                    "h-10 rounded-full border px-4 text-base transition-colors " +
+                    (pageOpen.font === style.id
+                      ? "border-terre bg-terre/10 text-foreground"
+                      : "border-input text-foreground hover:bg-muted")
+                  }
+                >
+                  {style.label}
+                </button>
+              ))}
+            </div>
+
+            <p className="mt-6 mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+              Couleur du texte de cette page
+            </p>
+            <p
+              className="mb-3 rounded-xl px-4 py-3 text-lg ring-1 ring-black/10"
+              style={{
+                backgroundColor: pageOpen.paper ?? theme.paper,
+                color: pageOpen.ink ?? ink ?? theme.ink,
+                fontFamily: findTextStyle(pageOpen.font ?? textStyle?.id, theme.font).css,
+              }}
+            >
+              Baptême de Maïa — juin 2026
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPageStyle(openPage.index, { ink: undefined })}
+                className={
+                  "h-10 rounded-full border px-3 text-xs transition-colors " +
+                  (pageOpen.ink === undefined
+                    ? "border-terre ring-2 ring-terre/40"
+                    : "border-input hover:bg-muted")
+                }
+              >
+                Comme le livre
+              </button>
+              {INK_PALETTE.map((color) => (
+                <button
+                  key={color.hex}
+                  type="button"
+                  onClick={() => setPageStyle(openPage.index, { ink: color.hex })}
+                  title={color.label}
+                  aria-label={"Texte en " + color.label}
+                  className={
+                    "size-10 rounded-full border transition-transform " +
+                    (pageOpen.ink?.toUpperCase() === color.hex
+                      ? "scale-110 border-terre ring-2 ring-terre/40"
+                      : "border-black/10 hover:scale-105")
+                  }
+                  style={{ backgroundColor: color.hex }}
+                />
+              ))}
+              <label className="flex h-10 cursor-pointer items-center gap-2 rounded-full border border-input px-3 text-xs text-foreground transition-colors hover:bg-muted">
+                <input
+                  type="color"
+                  value={pageOpen.ink ?? ink ?? theme.ink}
+                  onChange={(event) =>
+                    setPageStyle(openPage.index, { ink: event.target.value.toUpperCase() })
+                  }
+                  className="size-6 cursor-pointer rounded border-0 bg-transparent p-0"
+                />
+                Autre couleur
+              </label>
+            </div>
+
             <button
               type="button"
               onClick={() => applyStyleToAll(openPage.index)}
               className="mt-6 h-11 w-full rounded-full border border-input px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
             >
-              Appliquer la couleur et le papier peint à toutes les pages
+              Appliquer ces réglages à toutes les pages
             </button>
           </div>
         </div>
