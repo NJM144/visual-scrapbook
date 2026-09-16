@@ -273,6 +273,44 @@ export const createAlbum = createServerFn({ method: "POST" })
     return toAlbum(album);
   });
 
+/**
+ * Les lieux d'un album et le nombre de photos par lieu.
+ *
+ * Agrégé ici plutôt qu'en base : PostgREST ne sait pas grouper, et un album
+ * tient de toute façon en un millier de lignes d'une seule colonne.
+ */
+export const getAlbumPlaces = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data) => z.object({ albumId: z.string().uuid() }).parse(data))
+  .handler(
+    async ({
+      context,
+      data,
+    }): Promise<{ places: { place: string; count: number }[]; withoutPlace: number }> => {
+      const { data: rows, error } = await context.supabase
+        .from("photos")
+        .select("place")
+        .eq("album_id", data.albumId)
+        .eq("user_id", context.userId)
+        .limit(2000);
+
+      if (error) throw error;
+
+      const counts = new Map<string, number>();
+      let withoutPlace = 0;
+      for (const row of rows ?? []) {
+        if (row.place) counts.set(row.place, (counts.get(row.place) ?? 0) + 1);
+        else withoutPlace += 1;
+      }
+
+      const places = [...counts.entries()]
+        .map(([place, count]) => ({ place, count }))
+        .sort((a, b) => b.count - a.count || a.place.localeCompare(b.place, "fr"));
+
+      return { places, withoutPlace };
+    },
+  );
+
 /** Colonnes utiles à la grille ; les autres restent en base. */
 const GRID_COLUMNS =
   "id, storage_path, print_path, caption, order_index, created_at, taken_at, place, latitude, longitude, width, height, aspect_ratio, dominant_color, upload_status, thumb_url, display_url, urls_expire_at";
@@ -290,20 +328,36 @@ export const getPhotosPage = createServerFn({ method: "GET" })
         albumId: z.string().uuid(),
         offset: z.number().int().min(0),
         limit: z.number().int().min(1).max(120),
+        /** Ordre composé par l'auteur, ou chronologie des prises de vue. */
+        sort: z.enum(["album", "date", "date-desc"]).optional(),
+        /** Ne garder qu'un lieu ; « sans-lieu » pour celles qui n'en ont pas. */
+        place: z.string().max(160).nullable().optional(),
       })
       .parse(data),
   )
   .handler(async ({ context, data }): Promise<PhotoPage> => {
+    let query = context.supabase
+      .from("photos")
+      .select(GRID_COLUMNS, data.offset === 0 ? { count: "exact" } : {})
+      .eq("album_id", data.albumId)
+      .eq("user_id", context.userId);
+
+    if (data.place === "sans-lieu") query = query.is("place", null);
+    else if (data.place) query = query.eq("place", data.place);
+
+    // La date de prise de vue peut manquer (photo sans EXIF) : PostgREST place
+    // alors la ligne où on le lui dit, et non « quelque part ».
+    if (data.sort === "date")
+      query = query.order("taken_at", { ascending: true, nullsFirst: false });
+    else if (data.sort === "date-desc")
+      query = query.order("taken_at", { ascending: false, nullsFirst: false });
+    else query = query.order("order_index", { ascending: true });
+
     const {
       data: rows,
       error,
       count,
-    } = await context.supabase
-      .from("photos")
-      .select(GRID_COLUMNS, data.offset === 0 ? { count: "exact" } : {})
-      .eq("album_id", data.albumId)
-      .eq("user_id", context.userId)
-      .order("order_index", { ascending: true })
+    } = await query
       .order("created_at", { ascending: true })
       .range(data.offset, data.offset + data.limit - 1);
 
@@ -800,6 +854,8 @@ export const updateAlbumLayout = createServerFn({ method: "POST" })
             // réglages de page : non déclaré ici, zod le retirerait avant
             // l'écriture et l'enregistrement « réussirait » sans rien garder.
             effects: z.record(z.string().uuid(), z.string().min(1).max(24)).optional(),
+            // Page « carnet de route » en fin de livre (voir book-layout.ts).
+            roadbook: z.boolean().optional(),
           })
           .nullable(),
       })

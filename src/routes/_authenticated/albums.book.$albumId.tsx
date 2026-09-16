@@ -21,6 +21,7 @@ import { findFormat, spineWidthMm, effectiveDpi, MIN_PRINT_DPI } from "@/lib/pri
 import { findWallpaper } from "@/lib/wallpapers";
 import {
   layoutFromPlan,
+  type Roadbook,
   planBook,
   planFromLayout,
   withPrintPadding,
@@ -312,6 +313,30 @@ function BookStudio() {
     () => layoutFromPlan(plan, photoIds, layout?.effects),
     [plan, photoIds, layout?.effects],
   );
+
+  /**
+   * Ce que l'album raconte de lui-même : la période couverte et les lieux
+   * traversés, lus dans les métadonnées des photos (voir places.ts). Rien
+   * n'est saisi à la main — la page ne peut donc pas contredire les photos.
+   */
+  const roadbook = useMemo((): Roadbook => {
+    const dates = photos
+      .map((photo) => photo.taken_at)
+      .filter((date): date is string => Boolean(date))
+      .sort();
+    const counts = new Map<string, number>();
+    for (const photo of photos) {
+      if (photo.place) counts.set(photo.place, (counts.get(photo.place) ?? 0) + 1);
+    }
+    return {
+      from: dates[0] ?? null,
+      to: dates[dates.length - 1] ?? null,
+      places: [...counts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "fr"))
+        .map(([place]) => place),
+      photoCount: photos.length,
+    };
+  }, [photos]);
 
   const applyLayout = (next: AlbumLayout) => {
     setLayout(next);
@@ -873,6 +898,7 @@ function BookStudio() {
         textStyle,
         ink,
         coverInk,
+        roadbook,
         meta: { title, subtitle: coverSubtitle.trim(), dateLabel },
         onProgress: (done, total, label) => setProgress({ done, total, label }),
       });
@@ -1088,6 +1114,7 @@ function BookStudio() {
                     wallpaper={pageWallpaper}
                     textStyle={textStyle}
                     ink={ink}
+                    roadbook={roadbook}
                   />
                 ) : (
                   <BookPages
@@ -1102,6 +1129,7 @@ function BookStudio() {
                     wallpaper={pageWallpaper}
                     textStyle={textStyle}
                     ink={ink}
+                    roadbook={roadbook}
                   />
                 )}
 

@@ -8,6 +8,7 @@ import {
   type LayoutSlot,
   type PageFlow,
   type PageStyle,
+  type Roadbook,
 } from "@/lib/book-layout";
 import type { BookTheme } from "@/lib/book-themes";
 import {
@@ -111,6 +112,7 @@ export function BookEditor({
   wallpaper,
   textStyle,
   ink,
+  roadbook,
 }: {
   plan: BookPlan;
   /** Disposition correspondant au plan affiché, page pour page. */
@@ -128,6 +130,8 @@ export function BookEditor({
   /** Écriture et couleur du texte de l'album (voir text-styles.ts). */
   textStyle?: TextStyle | undefined;
   ink?: string | null | undefined;
+  /** Dates et lieux de l'album, pour la page « carnet de route ». */
+  roadbook?: Roadbook | undefined;
 }) {
   /** Photo dont le panneau d'actions est ouvert. */
   const [openPhoto, setOpenPhoto] = useState<string | null>(null);
@@ -457,6 +461,7 @@ export function BookEditor({
         wallpaper={wallpaper}
         textStyle={textStyle}
         ink={ink}
+        roadbook={roadbook}
         edit={{
           onSlotPointerDown: drag.handlePointerDown,
           hoverKey: drag.hoverKey,
@@ -475,18 +480,40 @@ export function BookEditor({
         }}
       />
 
-      <button
-        type="button"
-        onClick={() =>
-          onLayoutChange({
-            ...layout,
-            pages: [...layout.pages, { id: "p" + Date.now().toString(36), slots: [null] }],
-          })
-        }
-        className="mt-6 w-full rounded-full border border-input bg-background px-6 py-3.5 text-sm font-medium text-foreground transition-colors hover:bg-muted sm:w-auto"
-      >
-        Ajouter une page à la fin
-      </button>
+      <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+        <button
+          type="button"
+          onClick={() =>
+            onLayoutChange({
+              ...layout,
+              pages: [...layout.pages, { id: "p" + Date.now().toString(36), slots: [null] }],
+            })
+          }
+          className="w-full rounded-full border border-input bg-background px-6 py-3.5 text-sm font-medium text-foreground transition-colors hover:bg-muted sm:w-auto"
+        >
+          Ajouter une page à la fin
+        </button>
+
+        {/* Le carnet n'a de sens que si les photos savent où et quand elles ont
+            été prises : sans date ni lieu, le bouton ne s'affiche pas. */}
+        {roadbook && (roadbook.from || roadbook.places.length > 0) ? (
+          <button
+            type="button"
+            onClick={() => {
+              const { roadbook: _actuel, ...rest } = layout;
+              onLayoutChange(layout.roadbook ? rest : { ...rest, roadbook: true });
+            }}
+            className={
+              "w-full rounded-full border px-6 py-3.5 text-sm font-medium transition-colors sm:w-auto " +
+              (layout.roadbook
+                ? "border-terre bg-terre/10 text-foreground"
+                : "border-input bg-background text-foreground hover:bg-muted")
+            }
+          >
+            {layout.roadbook ? "Retirer le carnet de route" : "Ajouter un carnet de route"}
+          </button>
+        ) : null}
+      </div>
 
       {/* Vignette qui suit le doigt, décalée au-dessus pour ne pas être masquée. */}
       {drag.drag && draggedUrl ? (

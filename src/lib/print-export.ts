@@ -32,7 +32,8 @@ import {
   type PrintFormat,
 } from "./print-formats";
 import { hexToRgb01, type BookTheme } from "./book-themes";
-import type { BookPlan } from "./book-layout";
+import type { BookPlan, Roadbook } from "./book-layout";
+import { formatTakenAt } from "./places";
 import {
   TILE_COLUMNS,
   findCoverTemplate,
@@ -628,6 +629,8 @@ export interface ExportOptions {
   /** Couleurs du texte ; absentes, les encres du thème. */
   ink?: string | undefined;
   coverInk?: string | undefined;
+  /** Dates et lieux de l'album, pour la page « carnet de route ». */
+  roadbook?: Roadbook | undefined;
   onProgress?: (done: number, total: number, label: string) => void;
 }
 
@@ -732,6 +735,54 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
           italic,
           corps(12),
           format.heightMm * 0.42 + 12,
+          format.widthMm,
+          encreDiscrete,
+        );
+      }
+    } else if (bookPage.kind === "carnet") {
+      const carnet = options.roadbook;
+      let y = format.heightMm * 0.34;
+      drawCentered(sheet, "CARNET DE ROUTE", body, corps(9), y, format.widthMm, encreDiscrete);
+
+      if (carnet?.from) {
+        const debut = formatTakenAt(carnet.from);
+        const fin = formatTakenAt(carnet.to);
+        const periode = fin && fin !== debut ? "Du " + debut + " au " + fin : (debut ?? "");
+        y += 14;
+        drawCentered(
+          sheet,
+          fitText(periode, body, corps(15), mmToPt(format.widthMm - 30)),
+          body,
+          corps(15),
+          y,
+          format.widthMm,
+          encre,
+        );
+      }
+
+      // Les lieux, autant que la page en tient : au-delà, ce n'est plus un
+      // itinéraire mais une liste.
+      for (const lieu of carnet?.places.slice(0, 8) ?? []) {
+        y += 9;
+        drawCentered(
+          sheet,
+          fitText(lieu, italic, corps(10), mmToPt(format.widthMm - 30)),
+          italic,
+          corps(10),
+          y,
+          format.widthMm,
+          encreDiscrete,
+        );
+      }
+
+      if (carnet) {
+        y += 14;
+        drawCentered(
+          sheet,
+          carnet.photoCount + " photographie" + (carnet.photoCount > 1 ? "s" : ""),
+          italic,
+          corps(9),
+          y,
           format.widthMm,
           encreDiscrete,
         );

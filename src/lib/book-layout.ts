@@ -15,7 +15,22 @@ import { isTextBlock, normalizeTextBlock, type TextBlock } from "./text-blocks";
 /** Espace entre deux photos d'une même page. */
 const GUTTER_MM = 5;
 
-export type PageKind = "titre" | "photos" | "colophon" | "blanche";
+export type PageKind = "titre" | "photos" | "colophon" | "blanche" | "carnet";
+
+/**
+ * Ce que l'album raconte de lui-même : quand, et où.
+ *
+ * Calculé à partir des métadonnées des photos (voir places.ts), jamais saisi :
+ * une page qui se contredirait avec les photos serait pire que pas de page.
+ */
+export interface Roadbook {
+  /** Dates extrêmes des prises de vue, au format ISO. */
+  from: string | null;
+  to: string | null;
+  /** Lieux traversés, du plus photographié au moins photographié. */
+  places: string[];
+  photoCount: number;
+}
 
 export interface PhotoSlot {
   /** Rang de la photo dans l'album ; -1 quand la case n'en porte pas. */
@@ -253,6 +268,12 @@ export type LayoutSlot = string | TextBlock | null;
 export interface AlbumLayout {
   pages: ({ id: string; slots: LayoutSlot[] } & PageStyle)[];
   /**
+   * Page « carnet de route » en fin de livre : les dates couvertes et les
+   * lieux traversés. Absente par défaut — un album de studio n'a pas
+   * d'itinéraire.
+   */
+  roadbook?: boolean;
+  /**
    * Effet appliqué à chaque photo dans ce livre, par identifiant de photo
    * (voir photo-effects.ts). L'album, lui, garde l'image d'origine : un effet
    * est une décision de mise en page, pas une retouche du fichier.
@@ -336,8 +357,12 @@ export function layoutFromPlan(
   effects?: Record<string, string> | undefined,
 ): AlbumLayout {
   const kept = readEffects(effects);
+  // Le carnet se lit dans le plan lui-même : inutile de le repasser en
+  // paramètre, et impossible de l'oublier au passage.
+  const roadbook = plan.pages.some((page) => page.kind === "carnet");
   return {
     ...(kept ? { effects: kept } : {}),
+    ...(roadbook ? { roadbook: true } : {}),
     pages: plan.pages
       .filter((page) => page.kind === "photos")
       .map((page, index) => ({
@@ -417,6 +442,10 @@ export function planFromLayout(
 
   const orphans = photoIds.filter((id) => !used.has(id));
   for (let i = 0; i < orphans.length; i += 1) addPage([orphans[i] ?? null]);
+
+  // Le carnet ferme le livre, juste avant le colophon : on le lit après les
+  // photos, comme on relit un itinéraire une fois rentré.
+  if (layout.roadbook) pages.push({ kind: "carnet", number: pages.length + 1, slots: [] });
 
   pages.push({ kind: "colophon", number: pages.length + 1, slots: [] });
 

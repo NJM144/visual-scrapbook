@@ -12,6 +12,7 @@ import { dropUpload, enqueuePhotos, retryUpload, type UploadItem } from "@/lib/u
 import { useUploadSnapshot } from "@/hooks/use-uploads";
 import { PhotoViewer, type ViewerItem } from "@/components/PhotoViewer";
 import { fillAlbumPlaces } from "@/lib/places.functions";
+import { getAlbumPlaces } from "@/lib/albums.functions";
 
 export const Route = createFileRoute("/_authenticated/albums/$albumId")({
   head: () => ({
@@ -61,6 +62,10 @@ function AlbumDetailPage() {
   const removeAlbum = useServerFn(deleteAlbum);
   const queryClient = useQueryClient();
   const namePlaces = useServerFn(fillAlbumPlaces);
+  const fetchPlaces = useServerFn(getAlbumPlaces);
+  /** Ordre d'affichage et lieu retenu ; « sans-lieu » pour celles qui n'en ont pas. */
+  const [sort, setSort] = useState<"album" | "date" | "date-desc">("album");
+  const [placeFilter, setPlaceFilter] = useState<string | null>(null);
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [viewing, setViewing] = useState<string | null>(null);
@@ -72,9 +77,13 @@ function AlbumDetailPage() {
 
   // Par pages de 60 : un album de 200 photos ne se charge plus d'un bloc.
   const photosQuery = useInfiniteQuery({
-    queryKey: ["photos-page", albumId],
+    // Le tri et le filtre font partie de la clé : changer d'ordre repart de la
+    // première page, sans mélanger deux ordres dans la même liste.
+    queryKey: ["photos-page", albumId, sort, placeFilter],
     queryFn: ({ pageParam }) =>
-      fetchPage({ data: { albumId, offset: pageParam, limit: PAGE_SIZE } }),
+      fetchPage({
+        data: { albumId, offset: pageParam, limit: PAGE_SIZE, sort, place: placeFilter },
+      }),
     initialPageParam: 0,
     getNextPageParam: (last) => last.nextOffset ?? undefined,
   });
@@ -84,6 +93,22 @@ function AlbumDetailPage() {
     [photosQuery.data],
   );
   const total = photosQuery.data?.pages[0]?.total ?? photos.length;
+
+  /** Les lieux de l'album, pour le filtre. Rafraîchis quand le nommage avance. */
+  const placesQuery = useQuery({
+    queryKey: ["album-places", albumId],
+    queryFn: () => fetchPlaces({ data: { albumId } }),
+  });
+  const lieux = placesQuery.data?.places ?? [];
+  const sansLieuCount = placesQuery.data?.withoutPlace ?? 0;
+  /**
+   * Nombre de photos de l'album entier.
+   *
+   * `total` suit le filtre : s'en servir pour décider d'afficher la barre la
+   * faisait disparaître dès qu'on filtrait — et le filtre devenait alors
+   * impossible à retirer.
+   */
+  const totalAlbum = lieux.reduce((somme, lieu) => somme + lieu.count, 0) + sansLieuCount;
 
   const uploads = useUploadSnapshot();
   const albumUploads = useMemo(
@@ -188,8 +213,10 @@ function AlbumDetailPage() {
         // tant qu'il en reste, sans jamais boucler indéfiniment.
         for (let passage = 0; passage < 6 && vivant; passage += 1) {
           const { named, remaining } = await namePlaces({ data: { albumId } });
-          if (named > 0)
+          if (named > 0) {
             await queryClient.invalidateQueries({ queryKey: ["photos-page", albumId] });
+            await queryClient.invalidateQueries({ queryKey: ["album-places", albumId] });
+          }
           if (remaining === 0 || named === 0) break;
         }
       } catch {
@@ -330,11 +357,70 @@ function AlbumDetailPage() {
             )}
             <p className="mt-2 text-sm text-foreground/50">
               {total} photographie{total > 1 ? "s" : ""}
+              {placeFilter ? " sur " + totalAlbum : ""}
               {uploads.failed > 0 ? " · " + uploads.failed + " envoi(s) en échec" : ""}
               {/* Le nommage des lieux se fait à une requête par seconde : le
                   dire évite de croire que l'album est figé. */}
               {namingPlaces ? " · recherche des lieux…" : ""}
             </p>
+
+            {/* Trier et filtrer : deux menus, pas une page de réglages. Ils
+                n'apparaissent que lorsqu'ils servent — un album sans date ni
+                lieu n'a rien à trier. */}
+            {(totalAlbum > 1 && (lieux.length > 0 || photos.some((photo) => photo.taken_at))) ||
+            placeFilter ||
+            sort !== "album" ? (
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <label className="flex h-10 items-center gap-2 rounded-full border border-input bg-background pl-3 pr-1 text-xs text-muted-foreground">
+                  Trier
+                  <select
+                    value={sort}
+                    onChange={(event) =>
+                      setSort(event.target.value as "album" | "date" | "date-desc")
+                    }
+                    className="h-9 rounded-full bg-transparent pr-2 text-sm text-foreground outline-none"
+                  >
+                    <option value="album">Ordre de l’album</option>
+                    <option value="date">Du plus ancien au plus récent</option>
+                    <option value="date-desc">Du plus récent au plus ancien</option>
+                  </select>
+                </label>
+
+                {lieux.length > 0 ? (
+                  <label className="flex h-10 items-center gap-2 rounded-full border border-input bg-background pl-3 pr-1 text-xs text-muted-foreground">
+                    Lieu
+                    <select
+                      value={placeFilter ?? ""}
+                      onChange={(event) => setPlaceFilter(event.target.value || null)}
+                      className="h-9 max-w-[12rem] truncate rounded-full bg-transparent pr-2 text-sm text-foreground outline-none"
+                    >
+                      <option value="">Tous les lieux</option>
+                      {lieux.map((lieu) => (
+                        <option key={lieu.place} value={lieu.place}>
+                          {lieu.place} ({lieu.count})
+                        </option>
+                      ))}
+                      {sansLieuCount > 0 ? (
+                        <option value="sans-lieu">Sans lieu ({sansLieuCount})</option>
+                      ) : null}
+                    </select>
+                  </label>
+                ) : null}
+
+                {placeFilter || sort !== "album" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSort("album");
+                      setPlaceFilter(null);
+                    }}
+                    className="h-10 rounded-full border border-input px-4 text-xs text-foreground transition-colors hover:bg-muted"
+                  >
+                    Tout afficher
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <input
             ref={inputRef}

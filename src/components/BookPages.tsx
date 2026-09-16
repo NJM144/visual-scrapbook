@@ -1,4 +1,5 @@
-import type { BookPlan } from "@/lib/book-layout";
+import type { BookPlan, Roadbook } from "@/lib/book-layout";
+import { formatTakenAt } from "@/lib/places";
 import type { BookTheme } from "@/lib/book-themes";
 import { effectFilter } from "@/lib/photo-effects";
 import { findSticker, stickerUrl } from "@/lib/stickers";
@@ -81,6 +82,7 @@ export function BookPages({
   wallpaper,
   textStyle,
   ink,
+  roadbook,
 }: {
   plan: BookPlan;
   theme: BookTheme;
@@ -102,6 +104,8 @@ export function BookPages({
   textStyle?: TextStyle | undefined;
   /** Couleur du texte des pages ; absente, l'encre du thème. */
   ink?: string | null | undefined;
+  /** Dates et lieux de l'album, pour la page « carnet de route ». */
+  roadbook?: Roadbook | undefined;
 }) {
   const { format } = plan;
   const ecriture = textStyle ?? findTextStyle(null, theme.font);
@@ -175,6 +179,40 @@ export function BookPages({
                       style={{ color: encreDiscrete }}
                     >
                       {subtitle}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Carnet de route : ce que l'album raconte de lui-même, tiré
+                  des métadonnées des photos. Jamais saisi à la main — une page
+                  qui contredirait les photos serait pire que pas de page. */}
+              {page.kind === "carnet" ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-[4%] px-[12%] text-center">
+                  <span
+                    className="text-[clamp(0.5rem,1.9cqw,0.72rem)] uppercase tracking-[0.2em]"
+                    style={{ color: encreDiscrete }}
+                  >
+                    Carnet de route
+                  </span>
+                  {roadbook?.from ? (
+                    <span className="text-[clamp(0.7rem,2.6cqw,1.1rem)] leading-tight">
+                      {roadbook.to && roadbook.to !== roadbook.from
+                        ? "Du " + formatTakenAt(roadbook.from) + " au " + formatTakenAt(roadbook.to)
+                        : formatTakenAt(roadbook.from)}
+                    </span>
+                  ) : null}
+                  {roadbook?.places.length ? (
+                    <span
+                      className="text-balance text-[clamp(0.55rem,2.1cqw,0.85rem)] leading-relaxed"
+                      style={{ color: encreDiscrete }}
+                    >
+                      {roadbook.places.join(" · ")}
+                    </span>
+                  ) : null}
+                  {roadbook ? (
+                    <span className="text-[clamp(0.5rem,1.8cqw,0.68rem)] italic">
+                      {roadbook.photoCount} photographie{roadbook.photoCount > 1 ? "s" : ""}
                     </span>
                   ) : null}
                 </div>
@@ -420,9 +458,11 @@ export function BookPages({
               <span className="pl-1">
                 {page.kind === "titre"
                   ? "Page de titre"
-                  : page.kind === "colophon"
-                    ? "Fin du livre"
-                    : "Page " + page.number}
+                  : page.kind === "carnet"
+                    ? "Carnet de route"
+                    : page.kind === "colophon"
+                      ? "Fin du livre"
+                      : "Page " + page.number}
               </span>
               {editable ? (
                 <span className="flex gap-1.5">
