@@ -1,5 +1,6 @@
 import type { BookTheme } from "@/lib/book-themes";
 import { effectFilter } from "@/lib/photo-effects";
+import { findTextStyle, type TextStyle } from "@/lib/text-styles";
 import type { PrintFormat } from "@/lib/print-formats";
 import { wallpaperScreenUrl, type Wallpaper } from "@/lib/wallpapers";
 import {
@@ -27,6 +28,8 @@ export function CoverPreview({
   photoEffect,
   templateId,
   wallpaper,
+  textStyle,
+  ink,
   compact = false,
 }: {
   theme: BookTheme;
@@ -39,12 +42,18 @@ export function CoverPreview({
   templateId?: string | undefined;
   /** Papier peint sous la composition ; absent, le fond uni du thème. */
   wallpaper?: Wallpaper | null | undefined;
+  /** Écriture de l'album ; absente, celle du thème (voir text-styles.ts). */
+  textStyle?: TextStyle | undefined;
+  /** Couleur du texte de couverture ; absente, celle du thème. */
+  ink?: string | undefined;
   /** Dans un sélecteur, la légende sous la vignette n'est que du bruit. */
   compact?: boolean;
 }) {
   const template = findCoverTemplate(templateId);
   const motif = resolveMotif(template, theme);
   const hasPhoto = Boolean(photoUrl) && template.needsPhoto;
+  const ecriture = textStyle ?? findTextStyle(null, theme.font);
+  const encre = ink ?? theme.coverInk;
   // Le PDF cuit cet effet dans la photo de couverture : l'aperçu doit le montrer.
   const photoFilter = effectFilter(photoEffect);
 
@@ -56,7 +65,10 @@ export function CoverPreview({
           aspectRatio: format.widthMm + " / " + format.heightMm,
           backgroundColor:
             template.kind === "photo_pleine" ? theme.coverBackground : theme.coverBackground,
-          fontFamily: theme.font === "serif" ? "var(--font-serif)" : "var(--font-sans)",
+          fontFamily: ecriture.css,
+          // Une manuscrite paraît plus petite à corps égal : le facteur du
+          // catalogue rattrape l'écart, ici comme dans le PDF.
+          fontSize: ecriture.scale * 100 + "%",
           // Indispensable pour que les unités cqw ci-dessous aient un référent.
           containerType: "inline-size",
         }}
@@ -87,6 +99,7 @@ export function CoverPreview({
           subtitle={subtitle}
           photoUrl={hasPhoto ? photoUrl : undefined}
           photoFilter={photoFilter}
+          ink={encre}
         />
       </div>
 
@@ -173,6 +186,7 @@ function Composition({
   subtitle,
   photoUrl,
   photoFilter,
+  ink,
 }: {
   template: CoverTemplate;
   theme: BookTheme;
@@ -182,9 +196,9 @@ function Composition({
   photoUrl?: string | undefined;
   /** Filtre CSS de l'effet, tel qu'il sera cuit dans le PDF. */
   photoFilter?: string | undefined;
+  /** Couleur du texte, déjà résolue (album ou thème). */
+  ink: string;
 }) {
-  const ink = theme.coverInk;
-
   if (template.kind === "photo_pleine") {
     return (
       <>

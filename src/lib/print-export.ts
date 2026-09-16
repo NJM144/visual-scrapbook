@@ -21,6 +21,7 @@ import {
   type PDFPage,
   type PDFImage,
 } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
 import { strToU8, zipSync } from "fflate";
 import {
   BLEED_MM,
@@ -41,6 +42,7 @@ import {
 } from "./cover-templates";
 import { applyEffectToImageData, effectFilter, effectMatrix } from "./photo-effects";
 import { findSticker, stickerUrl, type PageSticker } from "./stickers";
+import { findTextStyle, type TextStyle } from "./text-styles";
 import { computePlacement, normalizeFraming, printedDpi, type Framing } from "./photo-framing";
 import {
   LINE_HEIGHT,
@@ -473,16 +475,18 @@ function drawTextBlock(
   block: TextBlock,
   font: PDFFont,
   hex: string,
+  /** Correction de corps de l'écriture (voir text-styles.ts). */
+  scale = 1,
 ): { dropped: number } {
   const size = findTextSize(block.size);
-  const sizePt = (size.mm / 25.4) * 72;
+  const sizePt = (size.mm / 25.4) * 72 * scale;
   const innerWidthMm = Math.max(5, slot.widthMm - TEXT_PADDING_MM * 2);
   const maxWidthPt = mmToPt(innerWidthMm);
 
   const lines = wrapText(safeText(block.text, font), maxWidthPt, (value) =>
     font.widthOfTextAtSize(value, sizePt),
   );
-  const lineHeightMm = size.mm * LINE_HEIGHT;
+  const lineHeightMm = size.mm * scale * LINE_HEIGHT;
   const innerHeightMm = Math.max(lineHeightMm, slot.heightMm - TEXT_PADDING_MM * 2);
   const fitting = Math.max(1, Math.floor(innerHeightMm / lineHeightMm));
   const shown = lines.slice(0, fitting);
@@ -499,7 +503,7 @@ function drawTextBlock(
         : slot.xMm + TEXT_PADDING_MM;
     // La ligne de base tombe aux trois quarts de l'interligne : le texte se
     // pose alors dans la bande, comme l'aperçu le montre.
-    const baselineMm = topMm + index * lineHeightMm + size.mm;
+    const baselineMm = topMm + index * lineHeightMm + size.mm * scale;
     const point = place(sheet, xMm, baselineMm, 0, 0);
     sheet.page.drawText(line, { x: point.x, y: point.y, size: sizePt, font, color: color(hex) });
   });
@@ -546,6 +550,65 @@ function drawMotif(
   });
 }
 
+/**
+ * Embarque l'écriture de l'album dans un document.
+ *
+ * Les polices standard du PDF ne connaissent que Times, Helvetica et Courier :
+ * une manuscrite ne peut donc venir que d'un fichier embarqué. C'est le même
+ * fichier que celui dont se sert l'aperçu (public/fonts), condition pour que
+ * l'imprimé ressemble à ce que l'auteur a vu. Sous-ensemble activé : seuls les
+ * caractères réellement utilisés voyagent, un livre ne pèse pas 300 Ko de plus.
+ *
+ * Si le fichier manque — réseau coupé, police retirée du catalogue — on
+ * retombe sur les polices standard plutôt que d'échouer : un livre en Times
+ * vaut mieux qu'un export impossible.
+ */
+const fontFileCache = new Map<string, ArrayBuffer>();
+
+async function loadFontFile(url: string): Promise<ArrayBuffer | null> {
+  const cached = fontFileCache.get(url);
+  if (cached) return cached;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const bytes = await response.arrayBuffer();
+    fontFileCache.set(url, bytes);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+interface Ecriture {
+  body: PDFFont;
+  italic: PDFFont;
+  /** Correction de corps de l'écriture (voir text-styles.ts). */
+  scale: number;
+}
+
+async function embedTextStyle(
+  pdf: PDFDocument,
+  style: TextStyle,
+  themeFont: "serif" | "sans",
+): Promise<Ecriture> {
+  pdf.registerFontkit(fontkit);
+
+  const regular = await loadFontFile(style.regular);
+  if (regular) {
+    const body = await pdf.embedFont(regular, { subset: true });
+    const italicFile = style.italic ? await loadFontFile(style.italic) : null;
+    const italic = italicFile ? await pdf.embedFont(italicFile, { subset: true }) : body;
+    return { body, italic, scale: style.scale };
+  }
+
+  const serif = themeFont === "serif";
+  return {
+    body: await pdf.embedFont(serif ? StandardFonts.TimesRoman : StandardFonts.Helvetica),
+    italic: await pdf.embedFont(serif ? StandardFonts.TimesRomanItalic : StandardFonts.Helvetica),
+    scale: 1,
+  };
+}
+
 /* ------------------------------------------------------------------ export */
 
 export interface ExportOptions {
@@ -560,6 +623,11 @@ export interface ExportOptions {
   /** Papiers peints ; absents, les fonds unis du thème. */
   coverWallpaper?: Wallpaper | null | undefined;
   pageWallpaper?: Wallpaper | null | undefined;
+  /** Écriture de l'album ; absente, celle du thème (voir text-styles.ts). */
+  textStyle?: TextStyle | undefined;
+  /** Couleurs du texte ; absentes, les encres du thème. */
+  ink?: string | undefined;
+  coverInk?: string | undefined;
   onProgress?: (done: number, total: number, label: string) => void;
 }
 
@@ -576,6 +644,18 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
     onProgress,
   } = options;
   const format = plan.format;
+  // Ce que l'auteur a choisi passe avant le thème, ici comme à l'écran.
+  const style = options.textStyle ?? findTextStyle(null, theme.font);
+  const encre = options.ink ?? theme.ink;
+  const encreCouverture = options.coverInk ?? theme.coverInk;
+  /**
+   * Sous-titres, colophon et numéros de page.
+   *
+   * Le thème leur donne un ton plus discret que le corps du texte ; mais si
+   * l'auteur a choisi une couleur, elle vaut pour *tout* le texte, sinon deux
+   * encres cohabiteraient dans un livre censé n'en avoir qu'une.
+   */
+  const encreDiscrete = options.ink ?? theme.accent;
   const warnings: string[] = [];
 
   const totalSteps = plan.photoCount + 2;
@@ -591,11 +671,11 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   interior.setSubject("Intérieur — " + format.label);
   interior.setCreator("PhotoZo");
 
-  const serif = await interior.embedFont(StandardFonts.TimesRoman);
-  const serifItalic = await interior.embedFont(StandardFonts.TimesRomanItalic);
-  const sans = await interior.embedFont(StandardFonts.Helvetica);
-  const body = theme.font === "serif" ? serif : sans;
-  const italic = theme.font === "serif" ? serifItalic : sans;
+  const ecriture = await embedTextStyle(interior, style, theme.font);
+  const body = ecriture.body;
+  const italic = ecriture.italic;
+  /** Corps corrigé : une manuscrite se pose plus grande qu'un romain. */
+  const corps = (size: number) => size * ecriture.scale;
 
   // Chaque papier peint est rendu une seule fois, fond perdu compris, puis
   // posé sur toutes les pages qui l'emploient : un JPEG par papier dans le
@@ -638,22 +718,22 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
     if (bookPage.kind === "titre") {
       drawCentered(
         sheet,
-        fitText(meta.title, body, 26, mmToPt(format.widthMm - 30)),
+        fitText(meta.title, body, corps(26), mmToPt(format.widthMm - 30)),
         body,
-        26,
+        corps(26),
         format.heightMm * 0.42,
         format.widthMm,
-        theme.ink,
+        encre,
       );
       if (meta.subtitle) {
         drawCentered(
           sheet,
-          fitText(meta.subtitle, italic, 12, mmToPt(format.widthMm - 30)),
+          fitText(meta.subtitle, italic, corps(12), mmToPt(format.widthMm - 30)),
           italic,
-          12,
+          corps(12),
           format.heightMm * 0.42 + 12,
           format.widthMm,
-          theme.accent,
+          encreDiscrete,
         );
       }
     } else if (bookPage.kind === "colophon") {
@@ -664,7 +744,7 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
         10,
         format.heightMm * 0.5,
         format.widthMm,
-        theme.accent,
+        encreDiscrete,
       );
       drawCentered(
         sheet,
@@ -673,13 +753,13 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
         9,
         format.heightMm * 0.5 + 8,
         format.widthMm,
-        theme.accent,
+        encreDiscrete,
       );
     }
 
     for (const slot of bookPage.slots) {
       if (slot.text) {
-        const { dropped } = drawTextBlock(sheet, slot, slot.text, body, theme.ink);
+        const { dropped } = drawTextBlock(sheet, slot, slot.text, body, encre, ecriture.scale);
         if (dropped > 0) {
           warnings.push(
             "Page " +
@@ -712,7 +792,7 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
       sheet.page.drawImage(image, place(sheet, slot.xMm, slot.yMm, slot.widthMm, imageHeight));
 
       if (caption) {
-        const size = 7.5;
+        const size = corps(7.5);
         const text = fitText(safeText(caption, italic), italic, size, mmToPt(slot.widthMm));
         const textWidthMm = (italic.widthOfTextAtSize(text, size) / 72) * 25.4;
         const p = place(
@@ -722,7 +802,7 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
           0,
           0,
         );
-        sheet.page.drawText(text, { x: p.x, y: p.y, size, font: italic, color: color(theme.ink) });
+        sheet.page.drawText(text, { x: p.x, y: p.y, size, font: italic, color: color(encre) });
       }
 
       // Même calcul que le badge du studio : l'écran a déjà prévenu de ce chiffre.
@@ -756,11 +836,11 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
       drawCentered(
         sheet,
         String(bookPage.number),
-        sans,
-        8,
+        body,
+        corps(8),
         format.heightMm - theme.photoMarginMm / 2 - 1,
         format.widthMm,
-        theme.accent,
+        encreDiscrete,
       );
     }
   }
@@ -777,11 +857,9 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   cover.setSubject("Couverture — dos " + spine + " mm");
   cover.setCreator("PhotoZo");
 
-  const coverSerif = await cover.embedFont(StandardFonts.TimesRoman);
-  const coverSerifItalic = await cover.embedFont(StandardFonts.TimesRomanItalic);
-  const coverSans = await cover.embedFont(StandardFonts.Helvetica);
-  const coverBody = theme.font === "serif" ? coverSerif : coverSans;
-  const coverItalic = theme.font === "serif" ? coverSerifItalic : coverSans;
+  const coverEcriture = await embedTextStyle(cover, style, theme.font);
+  const coverBody = coverEcriture.body;
+  const coverItalic = coverEcriture.italic;
 
   const sheet = addSheet(cover, coverWidth, format.heightMm);
   paintBackground(sheet, theme.coverBackground);
@@ -806,7 +884,7 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   const motif = resolveMotif(template, theme);
   const W = format.widthMm;
   const H = format.heightMm;
-  const ink = theme.coverInk;
+  const ink = encreCouverture;
   const big = W > 250 ? 34 : 24;
 
   /** Texte cadré dans le plat recto, tronqué s'il déborde. */
@@ -911,8 +989,8 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
       borderColor: color(ink),
       borderWidth: 0.8,
     });
-    drawFrontText(meta.title, coverBody, big * 0.75, H * 0.5, theme.ink);
-    drawFrontText(meta.subtitle, coverItalic, 10, H * 0.5 + 9, theme.accent);
+    drawFrontText(meta.title, coverBody, big * 0.75, H * 0.5, encre);
+    drawFrontText(meta.subtitle, coverItalic, corps(10), H * 0.5 + 9, encreDiscrete);
   } else if (template.kind === "bandeau") {
     await placePhoto(frontX, -BLEED_MM, W + BLEED_MM, H * 0.62 + BLEED_MM);
     sheet.page.drawRectangle({

@@ -38,6 +38,9 @@ function NewAlbumPage() {
   const [themeId, setThemeId] = useState(DEFAULT_THEME_ID);
   const [coverWallpaperId, setCoverWallpaperId] = useState<string | null>(null);
   const [pageWallpaperId, setPageWallpaperId] = useState<string | null>(null);
+  const [textFont, setTextFont] = useState<string | null>(null);
+  const [inkColor, setInkColor] = useState<string | null>(null);
+  const [coverInkColor, setCoverInkColor] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -58,6 +61,9 @@ function NewAlbumPage() {
           coverTemplate: coverTemplateId,
           coverWallpaper: coverWallpaperId,
           pageWallpaper: pageWallpaperId,
+          textFont,
+          inkColor,
+          coverInkColor,
         },
       });
       await queryClient.invalidateQueries({ queryKey: ["albums"] });
@@ -106,6 +112,12 @@ function NewAlbumPage() {
               pageWallpaperId={pageWallpaperId}
               onCoverWallpaperChange={setCoverWallpaperId}
               onPageWallpaperChange={setPageWallpaperId}
+              textFont={textFont}
+              inkColor={inkColor}
+              coverInkColor={coverInkColor}
+              onTextFontChange={setTextFont}
+              onInkColorChange={setInkColor}
+              onCoverInkColorChange={setCoverInkColor}
               title={title.trim() || "Mon album"}
               withPreview
             />

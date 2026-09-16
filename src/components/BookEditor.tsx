@@ -35,6 +35,7 @@ import {
   stickerUrl,
   type PageSticker,
 } from "@/lib/stickers";
+import type { TextStyle } from "@/lib/text-styles";
 import { WALLPAPERS, wallpaperScreenUrl, type Wallpaper } from "@/lib/wallpapers";
 
 /** Couleurs de fond proposées à la page ; le thème reste le premier choix. */
@@ -108,6 +109,8 @@ export function BookEditor({
   dpiByIndex,
   minDpi,
   wallpaper,
+  textStyle,
+  ink,
 }: {
   plan: BookPlan;
   /** Disposition correspondant au plan affiché, page pour page. */
@@ -122,6 +125,9 @@ export function BookEditor({
   dpiByIndex?: ReadonlyMap<number, number> | undefined;
   minDpi?: number | undefined;
   wallpaper?: Wallpaper | null | undefined;
+  /** Écriture et couleur du texte de l'album (voir text-styles.ts). */
+  textStyle?: TextStyle | undefined;
+  ink?: string | null | undefined;
 }) {
   /** Photo dont le panneau d'actions est ouvert. */
   const [openPhoto, setOpenPhoto] = useState<string | null>(null);
@@ -449,6 +455,8 @@ export function BookEditor({
         dpiByIndex={dpiByIndex}
         minDpi={minDpi}
         wallpaper={wallpaper}
+        textStyle={textStyle}
+        ink={ink}
         edit={{
           onSlotPointerDown: drag.handlePointerDown,
           hoverKey: drag.hoverKey,

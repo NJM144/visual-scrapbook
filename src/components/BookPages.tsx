@@ -2,6 +2,7 @@ import type { BookPlan } from "@/lib/book-layout";
 import type { BookTheme } from "@/lib/book-themes";
 import { effectFilter } from "@/lib/photo-effects";
 import { findSticker, stickerUrl } from "@/lib/stickers";
+import { findTextStyle, resolveInk, type TextStyle } from "@/lib/text-styles";
 import { LINE_HEIGHT, TEXT_PADDING_MM, findTextSize } from "@/lib/text-blocks";
 import type { Framing } from "@/lib/photo-framing";
 import { slotKey, type SlotPosition } from "@/lib/use-slot-drag";
@@ -78,6 +79,8 @@ export function BookPages({
   dpiByIndex,
   minDpi,
   wallpaper,
+  textStyle,
+  ink,
 }: {
   plan: BookPlan;
   theme: BookTheme;
@@ -95,8 +98,17 @@ export function BookPages({
   minDpi?: number | undefined;
   /** Papier peint sous toutes les pages ; absent, le papier uni du thème. */
   wallpaper?: Wallpaper | null | undefined;
+  /** Écriture de l'album ; absente, celle du thème (voir text-styles.ts). */
+  textStyle?: TextStyle | undefined;
+  /** Couleur du texte des pages ; absente, l'encre du thème. */
+  ink?: string | null | undefined;
 }) {
   const { format } = plan;
+  const ecriture = textStyle ?? findTextStyle(null, theme.font);
+  const encre = resolveInk(ink, theme.ink);
+  // Sous-titre, colophon et folio : le ton discret du thème, sauf si l'auteur
+  // a choisi une couleur — elle vaut alors pour tout le texte.
+  const encreDiscrete = ink && /^#[0-9a-fA-F]{6}$/.test(ink) ? ink : theme.accent;
 
   // Rang de chaque page parmi les pages de photos, -1 pour titre et colophon.
   let seen = -1;
@@ -132,8 +144,11 @@ export function BookPages({
               style={{
                 aspectRatio: format.widthMm + " / " + format.heightMm,
                 backgroundColor: paper,
-                color: theme.ink,
-                fontFamily: theme.font === "serif" ? "var(--font-serif)" : "var(--font-sans)",
+                color: encre,
+                fontFamily: ecriture.css,
+                // Une manuscrite paraît plus petite à corps égal : le facteur
+                // du catalogue rattrape l'écart, ici comme dans le PDF.
+                fontSize: ecriture.scale * 100 + "%",
               }}
             >
               {/* Le papier peint d'abord : tout ce qui suit se pose dessus. */}
@@ -157,7 +172,7 @@ export function BookPages({
                   {subtitle ? (
                     <span
                       className="mt-2 text-[clamp(0.55rem,2cqw,0.75rem)] italic"
-                      style={{ color: theme.accent }}
+                      style={{ color: encreDiscrete }}
                     >
                       {subtitle}
                     </span>
@@ -168,7 +183,7 @@ export function BookPages({
               {page.kind === "colophon" ? (
                 <div
                   className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-center text-[clamp(0.5rem,1.9cqw,0.7rem)]"
-                  style={{ color: theme.accent }}
+                  style={{ color: encreDiscrete }}
                 >
                   <span className="italic">{dateLabel}</span>
                   <span>{plan.photoCount} photographies</span>
@@ -271,7 +286,7 @@ export function BookPages({
                         {caption ? (
                           <span
                             className="block truncate pt-[2%] text-center text-[clamp(0.4rem,1.5cqw,0.6rem)] italic"
-                            style={{ color: theme.ink }}
+                            style={{ color: encre }}
                           >
                             {caption}
                           </span>
@@ -296,7 +311,7 @@ export function BookPages({
                             lineHeight: LINE_HEIGHT,
                             padding: (TEXT_PADDING_MM / slot.widthMm) * 100 + "%",
                             textAlign: block.align === "centre" ? "center" : "left",
-                            color: theme.ink,
+                            color: encre,
                           }}
                         >
                           {block.text}
@@ -393,7 +408,7 @@ export function BookPages({
                   className="absolute inset-x-0 text-center text-[clamp(0.35rem,1.3cqw,0.55rem)]"
                   style={{
                     bottom: pct(theme.photoMarginMm / 3, format.heightMm),
-                    color: theme.accent,
+                    color: encreDiscrete,
                   }}
                 >
                   {page.number}

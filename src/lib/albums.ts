@@ -22,6 +22,13 @@ export interface Album {
   cover_wallpaper: string | null;
   page_wallpaper: string | null;
   /**
+   * Écriture et couleurs du texte, pour tout l'album (voir text-styles.ts).
+   * `null` = on suit le thème, comme avant ce réglage.
+   */
+  text_font: string | null;
+  ink_color: string | null;
+  cover_ink_color: string | null;
+  /**
    * Disposition manuelle des pages ; `null` = découpage automatique.
    * Typée explicitement plutôt qu'en `unknown` : les valeurs traversant une
    * fonction serveur doivent être sérialisables de façon vérifiable.

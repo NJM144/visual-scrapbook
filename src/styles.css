@@ -14,6 +14,51 @@
  * c'est ce qui donne au site sa chaleur.
  */
 
+/* Écritures du livre — servies par le site, embarquées telles quelles dans le
+   PDF (voir text-styles.ts). Toutes sous licence SIL OFL. */
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/fonts/instrument-serif.ttf") format("truetype");
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/fonts/instrument-serif-italic.ttf") format("truetype");
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Sans";
+  src: url("/fonts/instrument-sans.ttf") format("truetype");
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Sans";
+  src: url("/fonts/instrument-sans-italic.ttf") format("truetype");
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Caveat";
+  src: url("/fonts/caveat.ttf") format("truetype");
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Courier Prime";
+  src: url("/fonts/courier-prime.ttf") format("truetype");
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Courier Prime";
+  src: url("/fonts/courier-prime-italic.ttf") format("truetype");
+  font-style: italic;
+  font-display: swap;
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

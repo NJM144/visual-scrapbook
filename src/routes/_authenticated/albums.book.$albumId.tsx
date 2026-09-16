@@ -35,6 +35,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { describePhotoAI, suggestAlbumTextsAI } from "@/lib/ai.functions";
 import { createAiThumbnail } from "@/lib/image-processing";
 import { PHOTO_EFFECTS, effectFilter } from "@/lib/photo-effects";
+import { findTextStyle, resolveInk } from "@/lib/text-styles";
 import { normalizeFraming, printedDpi, type Framing } from "@/lib/photo-framing";
 import {
   analyzePhoto,
@@ -139,6 +140,10 @@ function BookStudio() {
   /** Papiers peints ; `null` = fond uni du thème. */
   const [coverWallpaperId, setCoverWallpaperId] = useState<string | null>(null);
   const [pageWallpaperId, setPageWallpaperId] = useState<string | null>(null);
+  /** Écriture et couleurs du texte, pour tout l'album ; `null` = celles du thème. */
+  const [textFont, setTextFont] = useState<string | null>(null);
+  const [inkColor, setInkColor] = useState<string | null>(null);
+  const [coverInkColor, setCoverInkColor] = useState<string | null>(null);
 
   /** Ordre en cours d'édition, pas encore enregistré. */
   const [order, setOrder] = useState<string[]>([]);
@@ -175,6 +180,9 @@ function BookStudio() {
     setCoverTemplateId(album.cover_template);
     setCoverWallpaperId(album.cover_wallpaper ?? null);
     setPageWallpaperId(album.page_wallpaper ?? null);
+    setTextFont(album.text_font ?? null);
+    setInkColor(album.ink_color ?? null);
+    setCoverInkColor(album.cover_ink_color ?? null);
     setLayout(album.layout);
     setLayoutDirty(false);
   }, [album]);
@@ -227,6 +235,9 @@ function BookStudio() {
 
   const theme = findTheme(themeId);
   const format = findFormat(formatId);
+  const textStyle = findTextStyle(textFont, theme.font);
+  const ink = resolveInk(inkColor, theme.ink);
+  const coverInk = resolveInk(coverInkColor, theme.coverInk);
   // Les rapports d'aspect guident le découpage des pages : deux photos
   // verticales côte à côte plutôt qu'empilées, c'est autant de rognage évité.
   // Les dimensions enregistrées à l'import suffisent : plus besoin d'analyser
@@ -734,6 +745,9 @@ function BookStudio() {
           coverTemplate: coverTemplateId,
           coverWallpaper: coverWallpaperId,
           pageWallpaper: pageWallpaperId,
+          textFont,
+          inkColor,
+          coverInkColor,
           coverTitle: coverTitle.trim() || null,
           coverSubtitle: coverSubtitle.trim() || null,
           coverPhotoId,
@@ -817,6 +831,9 @@ function BookStudio() {
         coverTemplate: coverTemplateId,
         coverWallpaper,
         pageWallpaper,
+        textStyle,
+        ink,
+        coverInk,
         meta: { title, subtitle: coverSubtitle.trim(), dateLabel },
         onProgress: (done, total, label) => setProgress({ done, total, label }),
       });
@@ -926,6 +943,8 @@ function BookStudio() {
                 photoEffect={coverPhoto?.effect}
                 templateId={coverTemplateId}
                 wallpaper={coverWallpaper}
+                textStyle={textStyle}
+                ink={coverInk}
               />
             </div>
 
@@ -1028,6 +1047,8 @@ function BookStudio() {
                     dpiByIndex={dpiByIndex}
                     minDpi={MIN_PRINT_DPI}
                     wallpaper={pageWallpaper}
+                    textStyle={textStyle}
+                    ink={ink}
                   />
                 ) : (
                   <BookPages
@@ -1040,6 +1061,8 @@ function BookStudio() {
                     dpiByIndex={dpiByIndex}
                     minDpi={MIN_PRINT_DPI}
                     wallpaper={pageWallpaper}
+                    textStyle={textStyle}
+                    ink={ink}
                   />
                 )}
 
@@ -1076,6 +1099,12 @@ function BookStudio() {
                 pageWallpaperId={pageWallpaperId}
                 onCoverWallpaperChange={setCoverWallpaperId}
                 onPageWallpaperChange={setPageWallpaperId}
+                textFont={textFont}
+                inkColor={inkColor}
+                coverInkColor={coverInkColor}
+                onTextFontChange={setTextFont}
+                onInkColorChange={setInkColor}
+                onCoverInkColorChange={setCoverInkColor}
                 title={title}
                 photoUrl={coverPhoto?.signedUrl}
               />
@@ -1236,6 +1265,8 @@ function BookStudio() {
                 photoEffect={coverPhoto?.effect}
                 templateId={coverTemplateId}
                 wallpaper={coverWallpaper}
+                textStyle={textStyle}
+                ink={coverInk}
               />
 
               <dl className="rounded-2xl border border-border bg-card p-5 text-sm">

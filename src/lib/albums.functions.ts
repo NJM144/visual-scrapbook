@@ -236,6 +236,17 @@ export const createAlbum = createServerFn({ method: "POST" })
         coverTemplate: z.string().min(1).max(40).optional(),
         coverWallpaper: z.string().min(1).max(60).nullable().optional(),
         pageWallpaper: z.string().min(1).max(60).nullable().optional(),
+        textFont: z.string().min(1).max(40).nullable().optional(),
+        inkColor: z
+          .string()
+          .regex(/^#[0-9a-fA-F]{6}$/)
+          .nullable()
+          .optional(),
+        coverInkColor: z
+          .string()
+          .regex(/^#[0-9a-fA-F]{6}$/)
+          .nullable()
+          .optional(),
       })
       .parse(data),
   )
@@ -251,6 +262,9 @@ export const createAlbum = createServerFn({ method: "POST" })
         ...(data.coverTemplate ? { cover_template: data.coverTemplate } : {}),
         ...(data.coverWallpaper ? { cover_wallpaper: data.coverWallpaper } : {}),
         ...(data.pageWallpaper ? { page_wallpaper: data.pageWallpaper } : {}),
+        ...(data.textFont ? { text_font: data.textFont } : {}),
+        ...(data.inkColor ? { ink_color: data.inkColor } : {}),
+        ...(data.coverInkColor ? { cover_ink_color: data.coverInkColor } : {}),
       })
       .select()
       .single();
@@ -454,6 +468,19 @@ export const updateAlbumBook = createServerFn({ method: "POST" })
         coverTitle: z.string().max(120).nullable().optional(),
         coverSubtitle: z.string().max(160).nullable().optional(),
         coverPhotoId: z.string().uuid().nullable().optional(),
+        // Écriture et couleurs du texte (voir text-styles.ts) ; `null` rend la
+        // main au thème.
+        textFont: z.string().min(1).max(40).nullable().optional(),
+        inkColor: z
+          .string()
+          .regex(/^#[0-9a-fA-F]{6}$/)
+          .nullable()
+          .optional(),
+        coverInkColor: z
+          .string()
+          .regex(/^#[0-9a-fA-F]{6}$/)
+          .nullable()
+          .optional(),
       })
       .parse(data),
   )
@@ -469,6 +496,9 @@ export const updateAlbumBook = createServerFn({ method: "POST" })
         cover_title: data.coverTitle ?? null,
         cover_subtitle: data.coverSubtitle ?? null,
         cover_photo_id: data.coverPhotoId ?? null,
+        text_font: data.textFont ?? null,
+        ink_color: data.inkColor ?? null,
+        cover_ink_color: data.coverInkColor ?? null,
       })
       .eq("id", data.albumId)
       .eq("user_id", context.userId)

@@ -3,6 +3,7 @@ import { PRINT_FORMATS, findFormat } from "@/lib/print-formats";
 import { COVER_TEMPLATES } from "@/lib/cover-templates";
 import { CoverPreview } from "@/components/CoverPreview";
 import { WALLPAPERS, findWallpaper, wallpaperScreenUrl } from "@/lib/wallpapers";
+import { TEXT_STYLES, findTextStyle, resolveInk } from "@/lib/text-styles";
 
 /**
  * Coffret et thème : ce que l'on choisit avant tout le reste.
@@ -23,6 +24,12 @@ export function BookStylePicker({
   pageWallpaperId,
   onCoverWallpaperChange,
   onPageWallpaperChange,
+  textFont,
+  inkColor,
+  coverInkColor,
+  onTextFontChange,
+  onInkColorChange,
+  onCoverInkColorChange,
   title,
   photoUrl,
   withPreview = false,
@@ -38,6 +45,13 @@ export function BookStylePicker({
   pageWallpaperId: string | null;
   onCoverWallpaperChange: (id: string | null) => void;
   onPageWallpaperChange: (id: string | null) => void;
+  /** Écriture et couleurs du texte ; `null` = celles du thème. */
+  textFont: string | null;
+  inkColor: string | null;
+  coverInkColor: string | null;
+  onTextFontChange: (id: string | null) => void;
+  onInkColorChange: (hex: string | null) => void;
+  onCoverInkColorChange: (hex: string | null) => void;
   /** Titre affiché sur les maquettes de couverture. */
   title: string;
   photoUrl?: string | undefined;
@@ -47,6 +61,9 @@ export function BookStylePicker({
   const theme = findTheme(themeId);
   const format = findFormat(formatId);
   const coverWallpaper = findWallpaper(coverWallpaperId);
+  const textStyle = findTextStyle(textFont, theme.font);
+  const ink = resolveInk(inkColor, theme.ink);
+  const coverInk = resolveInk(coverInkColor, theme.coverInk);
 
   // min-w-0 : posé dans une colonne de grille, ce bloc prendrait sinon la
   // largeur de ses rangées défilantes (sept couvertures côte à côte) et la
@@ -123,6 +140,77 @@ export function BookStylePicker({
             </button>
           ))}
         </div>
+      </section>
+
+      <section>
+        <h3 className="mb-1 font-serif text-2xl text-foreground">L’écriture</h3>
+        <p className="mb-5 text-sm text-muted-foreground">
+          Les lettres et leur couleur, pour tout l’album : couverture, titres, légendes et
+          paragraphes.
+        </p>
+
+        <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+          Style de lettres
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {TEXT_STYLES.map((style) => {
+            const active = textStyle.id === style.id;
+            return (
+              <button
+                key={style.id}
+                type="button"
+                onClick={() => onTextFontChange(style.id)}
+                className={
+                  "rounded-2xl border p-4 text-left transition-colors " +
+                  (active ? "border-terre bg-terre/5" : "border-border hover:bg-muted")
+                }
+              >
+                {/* L'exemple est écrit dans la police elle-même : on choisit
+                    sur pièce, et c'est le fichier qui partira à l'impression. */}
+                <span
+                  className="block truncate text-2xl leading-tight text-foreground"
+                  style={{ fontFamily: style.css }}
+                >
+                  {title || "Baptême de Maïa"}
+                </span>
+                <span className="mt-2 block text-sm font-medium text-foreground">
+                  {style.label}
+                </span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">{style.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+        {textFont ? (
+          <button
+            type="button"
+            onClick={() => onTextFontChange(null)}
+            className="mt-3 h-10 rounded-full border border-input px-4 text-xs text-foreground transition-colors hover:bg-muted"
+          >
+            Revenir à l’écriture du thème
+          </button>
+        ) : null}
+
+        <InkPicker
+          label="Couleur du texte, dans les pages"
+          hint="Sur le papier du livre."
+          value={ink}
+          onChange={onInkColorChange}
+          themeValue={theme.ink}
+          chosen={inkColor}
+          background={theme.paper}
+          style={textStyle.css}
+        />
+        <InkPicker
+          label="Couleur du texte, sur la couverture"
+          hint="La couverture est souvent sombre ou couverte par une photo : elle a sa propre couleur."
+          value={coverInk}
+          onChange={onCoverInkColorChange}
+          themeValue={theme.coverInk}
+          chosen={coverInkColor}
+          background={theme.coverBackground}
+          style={textStyle.css}
+        />
       </section>
 
       <section>
@@ -208,6 +296,8 @@ export function BookStylePicker({
             photoUrl={photoUrl}
             templateId={coverTemplateId}
             wallpaper={coverWallpaper}
+            textStyle={textStyle}
+            ink={coverInk}
           />
         </div>
       </aside>
@@ -264,6 +354,98 @@ function WallpaperStrip({
             </span>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/** Palette d'encres : des tons qui tiennent à l'impression, plus le choix libre. */
+const INK_PALETTE: { hex: string; label: string }[] = [
+  { hex: "#141414", label: "Encre" },
+  { hex: "#3A2418", label: "Brun" },
+  { hex: "#1E5B3A", label: "Forêt" },
+  { hex: "#141B33", label: "Nuit" },
+  { hex: "#7A2E22", label: "Brique" },
+  { hex: "#B8562F", label: "Terre cuite" },
+  { hex: "#C2A377", label: "Ocre" },
+  { hex: "#6B7280", label: "Ardoise" },
+  { hex: "#FBF6EE", label: "Crème" },
+  { hex: "#FFFFFF", label: "Blanc" },
+];
+
+function InkPicker({
+  label,
+  hint,
+  value,
+  onChange,
+  themeValue,
+  chosen,
+  background,
+  style,
+}: {
+  label: string;
+  hint: string;
+  /** Couleur effective, thème compris. */
+  value: string;
+  onChange: (hex: string | null) => void;
+  themeValue: string;
+  /** Couleur choisie par l'auteur ; `null` = celle du thème. */
+  chosen: string | null;
+  /** Fond sur lequel l'aperçu écrit : une encre se juge sur son papier. */
+  background: string;
+  style: string;
+}) {
+  return (
+    <div className="mt-6">
+      <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+        {label}
+      </p>
+      <p className="mb-3 text-xs text-muted-foreground">{hint}</p>
+
+      <p
+        className="mb-3 rounded-xl px-4 py-3 text-xl leading-snug ring-1 ring-black/10"
+        style={{ backgroundColor: background, color: value, fontFamily: style }}
+      >
+        Baptême de Maïa — juin 2026
+      </p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onChange(null)}
+          title={"Encre du thème (" + themeValue + ")"}
+          className={
+            "h-10 rounded-full border px-3 text-xs transition-colors " +
+            (chosen === null ? "border-terre ring-2 ring-terre/40" : "border-input hover:bg-muted")
+          }
+        >
+          Thème
+        </button>
+        {INK_PALETTE.map((color) => (
+          <button
+            key={color.hex}
+            type="button"
+            onClick={() => onChange(color.hex)}
+            title={color.label}
+            aria-label={color.label}
+            className={
+              "size-10 rounded-full border transition-transform " +
+              (chosen?.toUpperCase() === color.hex
+                ? "scale-110 border-terre ring-2 ring-terre/40"
+                : "border-black/10 hover:scale-105")
+            }
+            style={{ backgroundColor: color.hex }}
+          />
+        ))}
+        <label className="flex h-10 cursor-pointer items-center gap-2 rounded-full border border-input px-3 text-xs text-foreground transition-colors hover:bg-muted">
+          <input
+            type="color"
+            value={value}
+            onChange={(event) => onChange(event.target.value.toUpperCase())}
+            className="size-6 cursor-pointer rounded border-0 bg-transparent p-0"
+          />
+          Autre couleur
+        </label>
       </div>
     </div>
   );
