@@ -170,6 +170,7 @@ export function BookEditor({
   /** Écrit, modifie ou retire le paragraphe d'une case. */
   const setSlotContent = (position: SlotPosition, content: LayoutSlot) => {
     onLayoutChange({
+      ...layout,
       pages: layout.pages.map((page, pageIndex) =>
         pageIndex === position.page
           ? { ...page, slots: page.slots.map((slot, i) => (i === position.slot ? content : slot)) }
@@ -189,6 +190,7 @@ export function BookEditor({
 
   const setStickers = (pageIndex: number, list: PageSticker[]) => {
     onLayoutChange({
+      ...layout,
       pages: layout.pages.map((page, index) => {
         if (index !== pageIndex) return page;
         const { stickers: _anciens, ...rest } = page;
@@ -352,6 +354,7 @@ export function BookEditor({
 
   const insertPageAfter = (photoPage: number) => {
     onLayoutChange({
+      ...layout,
       pages: [
         ...layout.pages.slice(0, photoPage + 1),
         { id: "p" + Date.now().toString(36), slots: [null] },
@@ -382,7 +385,7 @@ export function BookEditor({
     if (photoCount + textCount > 0 && !window.confirm(message)) {
       return;
     }
-    onLayoutChange({ pages: layout.pages.filter((_, index) => index !== photoPage) });
+    onLayoutChange({ ...layout, pages: layout.pages.filter((_, index) => index !== photoPage) });
     drag.setSelected(null);
   };
 
@@ -401,11 +404,12 @@ export function BookEditor({
       }
       return { ...page, slots: next };
     });
-    onLayoutChange({ pages });
+    onLayoutChange({ ...layout, pages });
   };
 
   const setPageStyle = (index: number, patch: PageStylePatch) => {
     onLayoutChange({
+      ...layout,
       pages: layout.pages.map((page, i) => (i === index ? mergeStyle(page, patch) : page)),
     });
   };
@@ -415,7 +419,7 @@ export function BookEditor({
     const source = layout.pages[index];
     if (!source) return;
     const patch: PageStylePatch = { paper: source.paper, wallpaper: source.wallpaper };
-    onLayoutChange({ pages: layout.pages.map((page) => mergeStyle(page, patch)) });
+    onLayoutChange({ ...layout, pages: layout.pages.map((page) => mergeStyle(page, patch)) });
   };
 
   const draggedUrl = urlOf(drag.draggedContent);
@@ -467,6 +471,7 @@ export function BookEditor({
         type="button"
         onClick={() =>
           onLayoutChange({
+            ...layout,
             pages: [...layout.pages, { id: "p" + Date.now().toString(36), slots: [null] }],
           })
         }

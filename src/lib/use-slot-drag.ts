@@ -139,7 +139,10 @@ export function useSlotDrag({
     source.slots[from.slot] = target.slots[to.slot] ?? null;
     target.slots[to.slot] = moved;
 
-    latest.current.onChange({ pages });
+    // Repartir de la disposition courante : `{ pages }` seul effacerait les
+    // effets rangés à la racine, et l'échange de deux photos n'a rien à voir
+    // avec eux.
+    latest.current.onChange({ ...current, pages });
   };
 
   const tap = (position: SlotPosition) => {
