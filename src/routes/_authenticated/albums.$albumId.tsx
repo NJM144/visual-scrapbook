@@ -11,6 +11,7 @@ import { isPhotoFile } from "@/lib/photo-intake";
 import { dropUpload, enqueuePhotos, retryUpload, type UploadItem } from "@/lib/upload-queue";
 import { useUploadSnapshot } from "@/hooks/use-uploads";
 import { PhotoViewer, type ViewerItem } from "@/components/PhotoViewer";
+import { fillAlbumPlaces } from "@/lib/places.functions";
 
 export const Route = createFileRoute("/_authenticated/albums/$albumId")({
   head: () => ({
@@ -59,6 +60,7 @@ function AlbumDetailPage() {
   const removePhoto = useServerFn(deletePhoto);
   const removeAlbum = useServerFn(deleteAlbum);
   const queryClient = useQueryClient();
+  const namePlaces = useServerFn(fillAlbumPlaces);
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [viewing, setViewing] = useState<string | null>(null);
@@ -159,6 +161,49 @@ function AlbumDetailPage() {
     if (lastVisibleRow >= Math.ceil(photos.length / columns) - 2) void photosQuery.fetchNextPage();
   }, [lastVisibleRow, photos.length, columns, photosQuery]);
 
+  /**
+   * Retrouve le nom des lieux, en tâche de fond.
+   *
+   * Les photos arrivent avec des coordonnées ; le nom demande un service
+   * extérieur, limité à une requête par seconde. On le lance donc ici, une
+   * seule fois par album et par visite, et on s'arrête dès qu'il ne reste
+   * rien à nommer. L'album s'affiche sans l'attendre : un lieu manquant n'est
+   * pas une erreur, c'est une ligne en moins sous la photo.
+   */
+  const placesAsked = useRef(false);
+  const [namingPlaces, setNamingPlaces] = useState(false);
+  const sansLieu = useMemo(
+    () => photos.filter((photo) => photo.latitude !== null && !photo.place).length,
+    [photos],
+  );
+  useEffect(() => {
+    if (placesAsked.current || sansLieu === 0) return;
+    placesAsked.current = true;
+    let vivant = true;
+
+    void (async () => {
+      setNamingPlaces(true);
+      try {
+        // Chaque passage nomme au plus une douzaine de lieux : on rappelle
+        // tant qu'il en reste, sans jamais boucler indéfiniment.
+        for (let passage = 0; passage < 6 && vivant; passage += 1) {
+          const { named, remaining } = await namePlaces({ data: { albumId } });
+          if (named > 0)
+            await queryClient.invalidateQueries({ queryKey: ["photos-page", albumId] });
+          if (remaining === 0 || named === 0) break;
+        }
+      } catch {
+        // Service indisponible : on réessaiera à la prochaine visite.
+      } finally {
+        if (vivant) setNamingPlaces(false);
+      }
+    })();
+
+    return () => {
+      vivant = false;
+    };
+  }, [sansLieu, albumId, namePlaces, queryClient]);
+
   // Filet de sécurité : les photos importées avant le LOT 2 n'ont pas leurs
   // proportions en base. La vignette affichée les donne, sans téléchargement
   // supplémentaire.
@@ -214,6 +259,10 @@ function AlbumDetailPage() {
           signedUrl: photo.displayUrl as string,
           thumbUrl: photo.thumbUrl,
           caption: photo.caption,
+          takenAt: photo.taken_at,
+          place: photo.place,
+          latitude: photo.latitude,
+          longitude: photo.longitude,
         })),
     [photos],
   );
@@ -282,6 +331,9 @@ function AlbumDetailPage() {
             <p className="mt-2 text-sm text-foreground/50">
               {total} photographie{total > 1 ? "s" : ""}
               {uploads.failed > 0 ? " · " + uploads.failed + " envoi(s) en échec" : ""}
+              {/* Le nommage des lieux se fait à une requête par seconde : le
+                  dire évite de croire que l'album est figé. */}
+              {namingPlaces ? " · recherche des lieux…" : ""}
             </p>
           </div>
           <input

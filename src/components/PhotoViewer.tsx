@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, MapPin, Trash2, X } from "lucide-react";
+import { formatCoordinates, formatTakenAt, mapUrl } from "@/lib/places";
 
 /**
  * Photo en plein écran, façon galerie de téléphone : on glisse à gauche ou à
@@ -14,6 +15,11 @@ export interface ViewerItem {
   signedUrl: string;
   thumbUrl?: string | null;
   caption?: string | null;
+  /** Ce que la photo sait d'elle-même : quand, et où (voir places.ts). */
+  takenAt?: string | null;
+  place?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 /** Distance horizontale au-delà de laquelle un glissement change de photo. */
@@ -163,7 +169,31 @@ export function PhotoViewer({
       </div>
 
       <div className="flex min-h-16 items-center gap-3 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3">
-        <p className="min-w-0 flex-1 truncate text-sm text-white/80">{photo.caption}</p>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm text-white/80">{photo.caption}</p>
+          {/* Ce que la photo porte en elle : la date de prise de vue et le
+              lieu. Un lien vers la carte quand on n'a que des coordonnées —
+              un nombre ne dit rien, une carte si. */}
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-white/55">
+            {formatTakenAt(photo.takenAt) ? <span>{formatTakenAt(photo.takenAt)}</span> : null}
+            {photo.place ? (
+              <span className="inline-flex items-center gap-1">
+                <MapPin className="size-3" aria-hidden />
+                {photo.place}
+              </span>
+            ) : photo.latitude != null && photo.longitude != null ? (
+              <a
+                href={mapUrl(photo.latitude, photo.longitude)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 underline decoration-white/30 underline-offset-2 hover:text-white/80"
+              >
+                <MapPin className="size-3" aria-hidden />
+                {formatCoordinates(photo.latitude, photo.longitude)}
+              </a>
+            ) : null}
+          </p>
+        </div>
         {onDelete ? (
           <button
             type="button"

@@ -8,6 +8,27 @@ export type Database = {
   };
   public: {
     Tables: {
+      geo_cache: {
+        Row: {
+          country: string | null;
+          created_at: string;
+          key: string;
+          label: string;
+        };
+        Insert: {
+          country?: string | null;
+          created_at?: string;
+          key: string;
+          label: string;
+        };
+        Update: {
+          country?: string | null;
+          created_at?: string;
+          key?: string;
+          label?: string;
+        };
+        Relationships: [];
+      };
       albums: {
         Row: {
           cover_image: string | null;

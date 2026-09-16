@@ -275,7 +275,7 @@ export const createAlbum = createServerFn({ method: "POST" })
 
 /** Colonnes utiles à la grille ; les autres restent en base. */
 const GRID_COLUMNS =
-  "id, storage_path, print_path, caption, order_index, created_at, taken_at, width, height, aspect_ratio, dominant_color, upload_status, thumb_url, display_url, urls_expire_at";
+  "id, storage_path, print_path, caption, order_index, created_at, taken_at, place, latitude, longitude, width, height, aspect_ratio, dominant_color, upload_status, thumb_url, display_url, urls_expire_at";
 
 /**
  * Une page de la grille d'un album. Les photos s'enregistrent désormais
@@ -318,6 +318,9 @@ export const getPhotosPage = createServerFn({ method: "GET" })
         caption: photo.caption,
         order_index: photo.order_index,
         taken_at: photo.taken_at,
+        place: photo.place,
+        latitude: photo.latitude,
+        longitude: photo.longitude,
         width: photo.width,
         height: photo.height,
         aspect_ratio: photo.aspect_ratio,

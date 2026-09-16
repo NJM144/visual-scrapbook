@@ -36,6 +36,7 @@ import { describePhotoAI, suggestAlbumTextsAI } from "@/lib/ai.functions";
 import { createAiThumbnail } from "@/lib/image-processing";
 import { PHOTO_EFFECTS, effectFilter } from "@/lib/photo-effects";
 import { findTextStyle, resolveInk } from "@/lib/text-styles";
+import { formatCoordinates, formatTakenAt, mapUrl, suggestCaption } from "@/lib/places";
 import { normalizeFraming, printedDpi, type Framing } from "@/lib/photo-framing";
 import {
   analyzePhoto,
@@ -359,6 +360,44 @@ function BookStudio() {
               : " — nette à l’impression."}
           </p>
         ) : null}
+        {/* Ce que la photo sait d'elle-même : quand et où. Le bouton écrit la
+            légende d'un geste — c'est le plus souvent celle qu'on aurait tapée. */}
+        {photo.taken_at || photo.place || photo.latitude !== null ? (
+          <div className="rounded-xl bg-muted/60 px-4 py-3 text-xs">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+              {formatTakenAt(photo.taken_at, true) ? (
+                <span>📅 {formatTakenAt(photo.taken_at, true)}</span>
+              ) : null}
+              {photo.place ? (
+                <span>📍 {photo.place}</span>
+              ) : photo.latitude !== null && photo.longitude !== null ? (
+                <a
+                  href={mapUrl(photo.latitude, photo.longitude)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  📍 {formatCoordinates(photo.latitude, photo.longitude)}
+                </a>
+              ) : null}
+            </div>
+            {suggestCaption(photo.place, photo.taken_at) ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const proposee = suggestCaption(photo.place, photo.taken_at);
+                  if (!proposee) return;
+                  setCaptions((current) => ({ ...current, [photo.id]: proposee }));
+                  void commitCaption(photo.id, proposee);
+                }}
+                className="mt-2 h-9 rounded-full border border-input bg-background px-3 text-xs text-foreground transition-colors hover:bg-muted"
+              >
+                Utiliser comme légende
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
         <div>
           <span className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
             Effet
@@ -512,8 +551,8 @@ function BookStudio() {
     year: "numeric",
   });
 
-  const commitCaption = async (photoId: string) => {
-    const value = captions[photoId] ?? "";
+  const commitCaption = async (photoId: string, force?: string) => {
+    const value = force ?? captions[photoId] ?? "";
     const original = rawPhotos.find((photo) => photo.id === photoId)?.caption ?? "";
     if (value.trim() === original.trim()) return;
 

@@ -98,6 +98,10 @@ export interface GridPhoto {
   upload_status: string;
   thumbUrl: string | null;
   displayUrl: string | null;
+  /** Lieu nommé (voir places.ts) et position EXIF, pour l'afficher et trier. */
+  place: string | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 /** Une page de la grille ; `total` n'est calculé que pour la première. */
