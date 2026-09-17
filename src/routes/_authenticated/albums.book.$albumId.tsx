@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Trash2 } from "lucide-react";
 import {
   deletePhoto,
   getAlbumForExport,
@@ -46,6 +47,9 @@ import {
   recommendTheme,
   type PhotoStats,
 } from "@/lib/photo-analysis";
+
+/** Les onglets du panneau d'une photo. */
+type PhotoTab = "effet" | "legende" | "cadrage" | "details";
 
 export const Route = createFileRoute("/_authenticated/albums/book/$albumId")({
   head: () => ({
@@ -151,7 +155,8 @@ function BookStudio() {
   const [order, setOrder] = useState<string[]>([]);
   const [captions, setCaptions] = useState<Record<string, string>>({});
   const [framings, setFramings] = useState<Record<string, Framing>>({});
-  const [openFramer, setOpenFramer] = useState<string | null>(null);
+  /** Onglet ouvert dans le panneau de photo ; il reste le même d'une photo à l'autre. */
+  const [photoTab, setPhotoTab] = useState<PhotoTab>("effet");
   const [orderDirty, setOrderDirty] = useState(false);
   const [moods, setMoods] = useState<Record<string, string>>({});
   const [peoples, setPeoples] = useState<Record<string, string>>({});
@@ -360,208 +365,368 @@ function BookStudio() {
   };
 
   /**
-   * Ce qu'on peut faire à une photo, tel qu'il s'ouvre en la touchant dans le
-   * livre. Le studio garde la main dessus : c'est lui qui tient les légendes
-   * en cours de frappe et sait les enregistrer.
+   * Le panneau d'une photo, tel qu'il s'ouvre en la touchant dans le livre.
+   *
+   * Pensé pour un téléphone tenu d'une main : la photo reste visible en haut,
+   * telle qu'elle s'imprimera (cadrage et effet compris) ; un seul onglet est
+   * ouvert à la fois, pour ne plus empiler effets, légende et cadrage dans un
+   * défilement sans fin ; et les actions sont collées en bas, là où arrive le
+   * pouce. « Supprimer » est mis à l'écart de « Terminé » : un pouce qui glisse
+   * ne doit pas coûter une photo.
    */
-  const renderPhotoActions = (photoId: string, close: () => void) => {
+  const renderPhotoActions = (
+    photoId: string,
+    actions: { close: () => void; armMove: () => void },
+  ) => {
     const index = photos.findIndex((photo) => photo.id === photoId);
     const photo = photos[index];
     if (!photo) return null;
+
     const dpi = dpiByIndex.get(index);
+    const soft = dpi !== undefined && dpi < MIN_PRINT_DPI;
+    const slotAspect = slotAspects.get(index) ?? 1;
+    const pageNumber = plan.pages.find((page) =>
+      page.slots.some((slot) => slot.photoIndex === index),
+    )?.number;
+    const filtre = effectFilter(photo.effect);
+    const legendeProposee = suggestCaption(photo.place, photo.taken_at);
+    /** Un aperçu au plus un tiers d'écran : le reste appartient aux réglages. */
+    const HAUTEUR_APERCU = "30svh";
+
+    const onglets: { id: PhotoTab; label: string }[] = [
+      { id: "effet", label: "Effet" },
+      { id: "legende", label: "Légende" },
+      { id: "cadrage", label: "Cadrage" },
+      { id: "details", label: "Détails" },
+    ];
 
     return (
-      <div className="space-y-3">
-        {dpi !== undefined ? (
-          <p
-            className={
-              "text-xs " +
-              (dpi < MIN_PRINT_DPI ? "font-medium text-amber-700" : "text-muted-foreground")
-            }
-          >
-            ≈ {dpi} dpi dans ce cadre
-            {dpi < MIN_PRINT_DPI
-              ? " — sortira floue à l’impression. Moins de zoom, ou une case plus petite."
-              : " — nette à l’impression."}
-          </p>
-        ) : null}
-        {/* Ce que la photo sait d'elle-même : quand et où. Le bouton écrit la
-            légende d'un geste — c'est le plus souvent celle qu'on aurait tapée. */}
-        {photo.taken_at || photo.place || photo.latitude !== null ? (
-          <div className="rounded-xl bg-muted/60 px-4 py-3 text-xs">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
-              {formatTakenAt(photo.taken_at, true) ? (
-                <span>📅 {formatTakenAt(photo.taken_at, true)}</span>
-              ) : null}
-              {photo.place ? (
-                <span>📍 {photo.place}</span>
-              ) : photo.latitude !== null && photo.longitude !== null ? (
-                <a
-                  href={mapUrl(photo.latitude, photo.longitude)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline underline-offset-2 hover:text-foreground"
-                >
-                  📍 {formatCoordinates(photo.latitude, photo.longitude)}
-                </a>
-              ) : null}
-            </div>
-            {suggestCaption(photo.place, photo.taken_at) ? (
-              <button
-                type="button"
-                onClick={() => {
-                  const proposee = suggestCaption(photo.place, photo.taken_at);
-                  if (!proposee) return;
-                  setCaptions((current) => ({ ...current, [photo.id]: proposee }));
-                  void commitCaption(photo.id, proposee);
-                }}
-                className="mt-2 h-9 rounded-full border border-input bg-background px-3 text-xs text-foreground transition-colors hover:bg-muted"
-              >
-                Utiliser comme légende
-              </button>
-            ) : null}
+      <>
+        <div className="flex shrink-0 items-center gap-3 px-5 pb-3 pt-1 sm:pt-5">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground">
+              Photo {index + 1}
+              {pageNumber ? " · page " + pageNumber : ""}
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
+              {captions[photo.id]?.trim() || "Sans légende"}
+            </p>
           </div>
-        ) : null}
-
-        <div>
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
-            Effet
-          </span>
-          {/* Chaque vignette montre l'effet sur cette photo-là : on choisit sur
-              pièce, pas sur un nom. Ce que l'aperçu affiche est exactement ce
-              que le PDF cuira dans les pixels. */}
-          <div className="-mx-5 flex snap-x gap-2 overflow-x-auto px-5 pb-2">
-            {[{ id: null, label: "Aucun", hint: "La photo telle quelle." }, ...PHOTO_EFFECTS].map(
-              (effect) => {
-                const active = (photo.effect ?? null) === effect.id;
-                return (
-                  <button
-                    key={effect.id ?? "aucun"}
-                    type="button"
-                    onClick={() => setPhotoEffect(photo.id, effect.id)}
-                    title={effect.hint}
-                    aria-pressed={active}
-                    className={
-                      "w-[4.5rem] shrink-0 snap-start overflow-hidden rounded-xl border text-left transition-colors " +
-                      (active
-                        ? "border-terre ring-2 ring-terre/40"
-                        : "border-border hover:border-foreground/30")
-                    }
-                  >
-                    <img
-                      src={photo.thumbUrl || photo.signedUrl}
-                      alt=""
-                      loading="lazy"
-                      decoding="async"
-                      className="h-14 w-full object-cover"
-                      style={{ filter: effectFilter(effect.id) }}
-                    />
-                    <span className="block truncate px-1.5 py-1 text-[0.65rem] font-medium text-foreground">
-                      {effect.label}
-                    </span>
-                  </button>
-                );
-              },
-            )}
-          </div>
-        </div>
-
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
-            Légende
-          </span>
-          <input
-            type="text"
-            value={captions[photo.id] ?? ""}
-            maxLength={300}
-            placeholder="Légende (facultative)"
-            onChange={(event) =>
-              setCaptions((current) => ({ ...current, [photo.id]: event.target.value }))
-            }
-            onBlur={() => void commitCaption(photo.id)}
-            className="w-full rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-          />
-        </label>
-
-        <input
-          type="text"
-          value={moods[photo.id] ?? ""}
-          maxLength={60}
-          placeholder="Ambiance (paisible, festif…)"
-          onChange={(event) =>
-            setMoods((current) => ({ ...current, [photo.id]: event.target.value }))
-          }
-          onBlur={() =>
-            void savePhotoMeta({
-              data: { photoId: photo.id, mood: moods[photo.id] ?? null },
-            }).catch(() => undefined)
-          }
-          className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
-        />
-
-        {(photo.face_count ?? 0) > 0 ? (
-          <input
-            type="text"
-            value={peoples[photo.id] ?? ""}
-            maxLength={300}
-            placeholder={
-              photo.face_count === 1
-                ? "Qui est sur la photo ?"
-                : photo.face_count + " personnes — leurs noms, séparés par une virgule"
-            }
-            onChange={(event) =>
-              setPeoples((current) => ({ ...current, [photo.id]: event.target.value }))
-            }
-            onBlur={() =>
-              void savePhotoMeta({
-                data: {
-                  photoId: photo.id,
-                  people: (peoples[photo.id] ?? "")
-                    .split(",")
-                    .map((name) => name.trim())
-                    .filter(Boolean),
-                },
-              }).catch(() => undefined)
-            }
-            className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
-          />
-        ) : null}
-
-        <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setOpenFramer(openFramer === photo.id ? null : photo.id)}
-            className={
-              "h-11 flex-1 rounded-full border px-4 text-sm transition-colors " +
-              (openFramer === photo.id ? "border-terre bg-terre/10" : "border-input hover:bg-muted")
-            }
+            onClick={actions.close}
+            aria-label="Fermer"
+            className="size-11 shrink-0 rounded-full border border-input text-base transition-colors hover:bg-muted"
           >
-            {openFramer === photo.id ? "Fermer le cadrage" : "Cadrer"}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              close();
-              void handleDeletePhoto(photo.id, photo.storage_path);
-            }}
-            className="h-11 rounded-full border border-input px-4 text-sm text-destructive transition-colors hover:bg-destructive/10"
-          >
-            Supprimer
+            ✕
           </button>
         </div>
 
-        {openFramer === photo.id ? (
-          <div className="border-t border-border pt-4">
+        {/* L'aperçu : la photo dans les proportions de sa case, avec son
+            cadrage et son effet. En mode cadrage, c'est lui qu'on fait
+            glisser — on règle là où on regarde. */}
+        <div className="shrink-0 px-5">
+          {photoTab === "cadrage" ? (
             <PhotoFramer
+              part="frame"
               url={photo.signedUrl}
-              slotAspect={slotAspects.get(index) ?? 1}
+              slotAspect={slotAspect}
               framing={photo.framing}
               paperColor={theme.paper}
+              effect={filtre}
+              maxHeight={HAUTEUR_APERCU}
               onChange={(next) => void commitFraming(photo.id, next)}
             />
-          </div>
-        ) : null}
-      </div>
+          ) : (
+            <div
+              className="relative mx-auto overflow-hidden rounded-xl ring-1 ring-black/10"
+              style={{
+                aspectRatio: String(slotAspect),
+                width: "min(100%, calc(" + HAUTEUR_APERCU + " * " + slotAspect + "))",
+                backgroundColor: theme.paper,
+              }}
+            >
+              <img
+                src={photo.signedUrl}
+                alt={captions[photo.id] || "Photographie"}
+                draggable={false}
+                className="size-full"
+                style={{
+                  objectFit: photo.framing.fit,
+                  objectPosition:
+                    photo.framing.cropX * 100 + "% " + photo.framing.cropY * 100 + "%",
+                  transformOrigin:
+                    photo.framing.cropX * 100 + "% " + photo.framing.cropY * 100 + "%",
+                  transform:
+                    photo.framing.fit === "cover" && photo.framing.cropZoom > 1
+                      ? "scale(" + photo.framing.cropZoom + ")"
+                      : undefined,
+                  filter: filtre,
+                }}
+              />
+              {soft ? (
+                /* La pastille est petite ; la zone qu'on touche, elle, fait
+                   44 px — le minimum pour un pouce. */
+                <button
+                  type="button"
+                  onClick={() => setPhotoTab("cadrage")}
+                  aria-label={"Définition faible : " + dpi + " dpi. Ouvrir le cadrage"}
+                  className="absolute left-0 top-0 flex min-h-11 items-start p-2.5"
+                >
+                  <span className="rounded-full bg-amber-600/90 px-2.5 py-1 text-xs font-medium text-white shadow-sm">
+                    ≈ {dpi} dpi
+                  </span>
+                </button>
+              ) : null}
+            </div>
+          )}
+        </div>
+
+        <div
+          role="tablist"
+          aria-label="Réglages de la photo"
+          className="grid shrink-0 grid-cols-4 gap-1.5 px-5 pt-3"
+        >
+          {onglets.map((onglet) => {
+            const actif = photoTab === onglet.id;
+            return (
+              <button
+                key={onglet.id}
+                type="button"
+                role="tab"
+                aria-selected={actif}
+                onClick={() => setPhotoTab(onglet.id)}
+                className={
+                  "relative h-11 rounded-full border text-sm transition-colors " +
+                  (actif
+                    ? "border-terre bg-terre/10 font-medium text-foreground"
+                    : "border-transparent text-muted-foreground hover:bg-muted")
+                }
+              >
+                {onglet.label}
+                {onglet.id === "cadrage" && soft ? (
+                  <span
+                    aria-hidden
+                    className="absolute right-2 top-2 size-2 rounded-full bg-amber-600"
+                  />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Le contenu de l'onglet défile seul : l'aperçu, les onglets et les
+            actions ne bougent pas. `overscroll-contain` empêche le livre, en
+            dessous, de défiler quand on atteint le bout. */}
+        <div
+          role="tabpanel"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4"
+        >
+          {photoTab === "effet" ? (
+            <div className="grid grid-cols-3 gap-2">
+              {[{ id: null, label: "Aucun", hint: "La photo telle quelle." }, ...PHOTO_EFFECTS].map(
+                (effect) => {
+                  const active = (photo.effect ?? null) === effect.id;
+                  return (
+                    <button
+                      key={effect.id ?? "aucun"}
+                      type="button"
+                      onClick={() => setPhotoEffect(photo.id, effect.id)}
+                      title={effect.hint}
+                      aria-pressed={active}
+                      className={
+                        "overflow-hidden rounded-xl border text-left transition-colors " +
+                        (active
+                          ? "border-terre ring-2 ring-terre/40"
+                          : "border-border hover:border-foreground/30")
+                      }
+                    >
+                      <img
+                        src={photo.thumbUrl || photo.signedUrl}
+                        alt=""
+                        loading="lazy"
+                        decoding="async"
+                        className="aspect-square w-full object-cover"
+                        style={{ filter: effectFilter(effect.id) }}
+                      />
+                      <span className="block px-2 py-1.5 text-xs font-medium leading-tight text-foreground">
+                        {effect.label}
+                      </span>
+                    </button>
+                  );
+                },
+              )}
+            </div>
+          ) : null}
+
+          {photoTab === "legende" ? (
+            <div className="space-y-3">
+              <textarea
+                value={captions[photo.id] ?? ""}
+                maxLength={300}
+                rows={2}
+                placeholder="Écrire une légende…"
+                aria-label="Légende"
+                onChange={(event) =>
+                  setCaptions((current) => ({ ...current, [photo.id]: event.target.value }))
+                }
+                onBlur={() => void commitCaption(photo.id)}
+                className="w-full resize-none rounded-xl border border-input bg-background px-4 py-3 text-base outline-none focus:ring-2 focus:ring-ring"
+              />
+              {legendeProposee && legendeProposee !== (captions[photo.id] ?? "") ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCaptions((current) => ({ ...current, [photo.id]: legendeProposee }));
+                    void commitCaption(photo.id, legendeProposee);
+                  }}
+                  className="flex min-h-11 w-full items-center gap-2 rounded-xl border border-input bg-background px-4 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted"
+                >
+                  <span aria-hidden>✨</span>
+                  <span className="min-w-0 flex-1">Utiliser « {legendeProposee} »</span>
+                </button>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                Enregistrée dès que vous quittez le champ. Elle s’imprime sous la photo, sur une
+                ligne.
+              </p>
+            </div>
+          ) : null}
+
+          {photoTab === "cadrage" ? (
+            <div className="space-y-4">
+              <PhotoFramer
+                part="controls"
+                url={photo.signedUrl}
+                slotAspect={slotAspect}
+                framing={photo.framing}
+                paperColor={theme.paper}
+                onChange={(next) => void commitFraming(photo.id, next)}
+              />
+              {dpi !== undefined ? (
+                <p
+                  className={
+                    "rounded-xl px-4 py-3 text-sm " +
+                    (soft
+                      ? "bg-amber-50 font-medium text-amber-800"
+                      : "bg-muted/60 text-muted-foreground")
+                  }
+                >
+                  ≈ {dpi} dpi dans ce cadre
+                  {soft
+                    ? " — sortira floue à l’impression. Moins de zoom, ou une case plus petite."
+                    : " — nette à l’impression."}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {photoTab === "details" ? (
+            <div className="space-y-3">
+              {photo.taken_at || photo.place || photo.latitude !== null ? (
+                <div className="space-y-1.5 rounded-xl bg-muted/60 px-4 py-3 text-sm text-foreground">
+                  {formatTakenAt(photo.taken_at, true) ? (
+                    <p>📅 {formatTakenAt(photo.taken_at, true)}</p>
+                  ) : null}
+                  {photo.place ? <p>📍 {photo.place}</p> : null}
+                  {photo.latitude !== null && photo.longitude !== null ? (
+                    <a
+                      href={mapUrl(photo.latitude, photo.longitude)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex min-h-11 items-center text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                    >
+                      {photo.place
+                        ? "Voir sur la carte"
+                        : "📍 " + formatCoordinates(photo.latitude, photo.longitude)}
+                    </a>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="rounded-xl bg-muted/60 px-4 py-3 text-sm text-muted-foreground">
+                  Cette photo ne dit ni où ni quand elle a été prise — c’est souvent le cas des
+                  photos passées par WhatsApp.
+                </p>
+              )}
+
+              <input
+                type="text"
+                value={moods[photo.id] ?? ""}
+                maxLength={60}
+                placeholder="Ambiance (paisible, festif…)"
+                aria-label="Ambiance"
+                onChange={(event) =>
+                  setMoods((current) => ({ ...current, [photo.id]: event.target.value }))
+                }
+                onBlur={() =>
+                  void savePhotoMeta({
+                    data: { photoId: photo.id, mood: moods[photo.id] ?? null },
+                  }).catch(() => undefined)
+                }
+                className="h-12 w-full rounded-xl border border-input bg-background px-4 text-base outline-none focus:ring-2 focus:ring-ring"
+              />
+
+              {(photo.face_count ?? 0) > 0 ? (
+                <input
+                  type="text"
+                  value={peoples[photo.id] ?? ""}
+                  maxLength={300}
+                  aria-label="Personnes sur la photo"
+                  placeholder={
+                    photo.face_count === 1
+                      ? "Qui est sur la photo ?"
+                      : photo.face_count + " personnes — leurs noms, séparés par une virgule"
+                  }
+                  onChange={(event) =>
+                    setPeoples((current) => ({ ...current, [photo.id]: event.target.value }))
+                  }
+                  onBlur={() =>
+                    void savePhotoMeta({
+                      data: {
+                        photoId: photo.id,
+                        people: (peoples[photo.id] ?? "")
+                          .split(",")
+                          .map((name) => name.trim())
+                          .filter(Boolean),
+                      },
+                    }).catch(() => undefined)
+                  }
+                  className="h-12 w-full rounded-xl border border-input bg-background px-4 text-base outline-none focus:ring-2 focus:ring-ring"
+                />
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2 border-t border-border bg-card px-5 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 sm:pb-4">
+          <button
+            type="button"
+            onClick={actions.armMove}
+            className="h-12 rounded-full border border-input px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            Déplacer
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              void handleDeletePhoto(photo.id, photo.storage_path).then((supprimee) => {
+                if (supprimee) actions.close();
+              })
+            }
+            aria-label="Supprimer la photo"
+            className="flex size-12 shrink-0 items-center justify-center rounded-full border border-input text-destructive transition-colors hover:bg-destructive/10"
+          >
+            <Trash2 className="size-5" aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={actions.close}
+            className="h-12 flex-1 rounded-full bg-terre px-4 text-sm font-medium text-white transition-colors hover:bg-terre/90"
+          >
+            Terminé
+          </button>
+        </div>
+      </>
     );
   };
 
@@ -597,7 +762,7 @@ function BookStudio() {
    * comprendre ni combler.
    */
   const handleDeletePhoto = async (photoId: string, storagePath: string) => {
-    if (!window.confirm("Supprimer définitivement cette photo de l’album ?")) return;
+    if (!window.confirm("Supprimer définitivement cette photo de l’album ?")) return false;
 
     try {
       await removePhoto({ data: { photoId, storagePath } });
@@ -624,8 +789,10 @@ function BookStudio() {
       await queryClient.invalidateQueries({ queryKey: ["photos", albumId] });
       await queryClient.invalidateQueries({ queryKey: ["albums"] });
       toast.success("Photo supprimée.");
+      return true;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Suppression impossible");
+      return false;
     }
   };
 

@@ -15,6 +15,9 @@ export function PhotoFramer({
   framing,
   paperColor,
   onChange,
+  effect,
+  maxHeight,
+  part = "all",
 }: {
   url: string;
   /** Rapport largeur/hauteur de l'emplacement à remplir. */
@@ -22,6 +25,19 @@ export function PhotoFramer({
   framing: Framing;
   paperColor: string;
   onChange: (framing: Framing) => void;
+  /** Filtre CSS de l'effet du livre : on cadre ce qui sera imprimé. */
+  effect?: string | undefined;
+  /**
+   * Hauteur maximale du cadre (unité CSS). Sur un téléphone, un cadre vertical
+   * pleine largeur remplirait l'écran et pousserait les réglages hors de vue.
+   */
+  maxHeight?: string | undefined;
+  /**
+   * Le cadre seul, les réglages seuls, ou les deux. Le panneau de photo pose le
+   * cadre en haut, là où l'œil reste, et les réglages sous les onglets : les
+   * deux parties partagent le même cadrage, puisqu'il vient des props.
+   */
+  part?: "all" | "frame" | "controls";
 }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
@@ -110,102 +126,130 @@ export function PhotoFramer({
     [framing, onChange],
   );
 
+  const showFrame = part !== "controls";
+  const showControls = part !== "frame";
+
   return (
     <div>
-      <div
-        ref={frameRef}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        onWheel={handleWheel}
-        className={
-          "relative w-full touch-none select-none overflow-hidden rounded-xl ring-1 ring-black/10 " +
-          (movable ? "cursor-move" : "cursor-default")
-        }
-        style={{ aspectRatio: String(slotAspect), backgroundColor: paperColor }}
-      >
-        <img
-          src={url}
-          alt=""
-          draggable={false}
-          onLoad={(event) =>
-            setNatural({
-              width: event.currentTarget.naturalWidth,
-              height: event.currentTarget.naturalHeight,
-            })
+      {showFrame ? (
+        <div
+          ref={frameRef}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onWheel={handleWheel}
+          className={
+            "relative w-full touch-none select-none overflow-hidden rounded-xl ring-1 ring-black/10 " +
+            (movable ? "cursor-move" : "cursor-default")
           }
-          className="absolute max-w-none"
           style={{
-            left: left + "px",
-            top: top + "px",
-            width: renderedWidth + "px",
-            height: renderedHeight + "px",
+            aspectRatio: String(slotAspect),
+            backgroundColor: paperColor,
+            ...(maxHeight
+              ? {
+                  width: "min(100%, calc(" + maxHeight + " * " + slotAspect + "))",
+                  marginInline: "auto",
+                }
+              : {}),
           }}
-        />
-
-        {/* Repère du tiers : aide à placer un sujet sans le centrer bêtement. */}
-        <div aria-hidden className="pointer-events-none absolute inset-0">
-          <span className="absolute inset-y-0 left-1/3 w-px bg-white/25" />
-          <span className="absolute inset-y-0 left-2/3 w-px bg-white/25" />
-          <span className="absolute inset-x-0 top-1/3 h-px bg-white/25" />
-          <span className="absolute inset-x-0 top-2/3 h-px bg-white/25" />
-        </div>
-      </div>
-
-      <p className="mt-2 text-xs text-muted-foreground">
-        {framing.fit === "contain"
-          ? "Photo entière : rien n’est coupé, des marges apparaissent."
-          : movable
-            ? "Glissez la photo pour choisir ce qui reste visible."
-            : "Cette photo remplit déjà le cadre exactement."}
-      </p>
-
-      <div className="mt-4 space-y-4">
-        <div className="flex gap-2">
-          {(["cover", "contain"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => onChange({ ...framing, fit: mode })}
-              className={
-                "flex-1 rounded-full border px-4 py-2 text-sm font-medium transition-colors " +
-                (framing.fit === mode
-                  ? "border-terre bg-terre/10 text-foreground"
-                  : "border-input text-muted-foreground hover:bg-muted")
-              }
-            >
-              {mode === "cover" ? "Remplir le cadre" : "Photo entière"}
-            </button>
-          ))}
-        </div>
-
-        {framing.fit === "cover" ? (
-          <label className="block text-sm">
-            <span className="flex items-center justify-between text-muted-foreground">
-              Zoom
-              <span className="font-medium text-foreground">×{framing.cropZoom.toFixed(2)}</span>
-            </span>
-            <input
-              type="range"
-              min={MIN_ZOOM}
-              max={MAX_ZOOM}
-              step={0.05}
-              value={framing.cropZoom}
-              onChange={(event) => onChange({ ...framing, cropZoom: Number(event.target.value) })}
-              className="mt-2 w-full"
-            />
-          </label>
-        ) : null}
-
-        <button
-          type="button"
-          onClick={() => onChange({ ...DEFAULT_FRAMING })}
-          className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
         >
-          Recentrer
-        </button>
-      </div>
+          <img
+            src={url}
+            alt=""
+            draggable={false}
+            onLoad={(event) =>
+              setNatural({
+                width: event.currentTarget.naturalWidth,
+                height: event.currentTarget.naturalHeight,
+              })
+            }
+            className="absolute max-w-none"
+            style={{
+              left: left + "px",
+              top: top + "px",
+              width: renderedWidth + "px",
+              height: renderedHeight + "px",
+              filter: effect,
+            }}
+          />
+
+          {/* Repère du tiers : aide à placer un sujet sans le centrer bêtement. */}
+          <div aria-hidden className="pointer-events-none absolute inset-0">
+            <span className="absolute inset-y-0 left-1/3 w-px bg-white/25" />
+            <span className="absolute inset-y-0 left-2/3 w-px bg-white/25" />
+            <span className="absolute inset-x-0 top-1/3 h-px bg-white/25" />
+            <span className="absolute inset-x-0 top-2/3 h-px bg-white/25" />
+          </div>
+        </div>
+      ) : null}
+
+      {showControls ? (
+        <>
+          <p className={(showFrame ? "mt-2 " : "") + "text-xs text-muted-foreground"}>
+            {/* Réglages seuls : le cadre et ses mesures vivent dans l'aperçu,
+                cette partie ne sait donc pas si la photo déborde. Elle renvoie
+                vers l'aperçu plutôt que d'affirmer à tort « rien à déplacer ». */}
+            {framing.fit === "contain"
+              ? "Photo entière : rien n’est coupé, des marges apparaissent."
+              : !showFrame
+                ? "Glissez la photo dans l’aperçu pour choisir ce qui reste visible ; zoomez pour resserrer."
+                : movable
+                  ? "Glissez la photo pour choisir ce qui reste visible."
+                  : "Cette photo remplit déjà le cadre exactement."}
+          </p>
+
+          <div className="mt-4 space-y-4">
+            <div className="flex gap-2">
+              {(["cover", "contain"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onChange({ ...framing, fit: mode })}
+                  className={
+                    "h-11 flex-1 rounded-full border px-4 text-sm font-medium transition-colors " +
+                    (framing.fit === mode
+                      ? "border-terre bg-terre/10 text-foreground"
+                      : "border-input text-muted-foreground hover:bg-muted")
+                  }
+                >
+                  {mode === "cover" ? "Remplir le cadre" : "Photo entière"}
+                </button>
+              ))}
+            </div>
+
+            {framing.fit === "cover" ? (
+              <label className="block text-sm">
+                <span className="flex items-center justify-between text-muted-foreground">
+                  Zoom
+                  <span className="font-medium text-foreground">
+                    ×{framing.cropZoom.toFixed(2)}
+                  </span>
+                </span>
+                <input
+                  type="range"
+                  min={MIN_ZOOM}
+                  max={MAX_ZOOM}
+                  step={0.05}
+                  value={framing.cropZoom}
+                  onChange={(event) =>
+                    onChange({ ...framing, cropZoom: Number(event.target.value) })
+                  }
+                  className="mt-1 h-11 w-full accent-terre"
+                />
+              </label>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => onChange({ ...DEFAULT_FRAMING })}
+              className="h-11 rounded-full border border-input px-4 text-sm text-foreground transition-colors hover:bg-muted"
+            >
+              Recentrer
+            </button>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

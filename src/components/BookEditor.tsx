@@ -130,7 +130,15 @@ export function BookEditor({
   title: string;
   subtitle: string;
   dateLabel: string;
-  renderPhotoActions: (photoId: string, close: () => void) => ReactNode;
+  /**
+   * Le contenu du panneau de photo : aperçu, onglets, barre d'actions. Le
+   * studio le fournit parce qu'il tient les légendes et les cadrages ;
+   * l'éditeur fournit le conteneur, la poignée et le geste de fermeture.
+   */
+  renderPhotoActions: (
+    photoId: string,
+    actions: { close: () => void; armMove: () => void },
+  ) => ReactNode;
   dpiByIndex?: ReadonlyMap<number, number> | undefined;
   minDpi?: number | undefined;
   wallpaper?: Wallpaper | null | undefined;
@@ -142,6 +150,13 @@ export function BookEditor({
 }) {
   /** Photo dont le panneau d'actions est ouvert. */
   const [openPhoto, setOpenPhoto] = useState<string | null>(null);
+  /**
+   * Glissement de la poignée du panneau, en pixels vers le bas. Au-delà d'un
+   * seuil, le panneau se ferme : c'est le geste attendu d'une feuille qui
+   * monte du bas de l'écran.
+   */
+  const [sheetDrag, setSheetDrag] = useState(0);
+  const sheetStart = useRef<{ y: number; pointerId: number } | null>(null);
   /** Case dont le paragraphe est en cours d'écriture. */
   const [openText, setOpenText] = useState<SlotPosition | null>(null);
   /** Page dont les réglages sont ouverts : rang parmi les pages de photos, numéro imprimé. */
@@ -467,7 +482,6 @@ export function BookEditor({
 
   const draggedUrl = urlOf(drag.draggedContent);
   const selectedUrl = urlOf(drag.selectedContent);
-  const openUrl = urlOf(openPhoto);
   const openTextBlock = textAt(openText);
   const pageOpen = openPage ? layout.pages[openPage.index] : undefined;
   const pageWallpaperId =
@@ -608,36 +622,50 @@ export function BookEditor({
             onClick={() => setOpenPhoto(null)}
             className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
           />
-          <div className="relative max-h-[85svh] w-full overflow-y-auto rounded-t-3xl border border-border bg-card p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl sm:max-w-lg sm:rounded-3xl sm:pb-5">
-            <div className="mb-4 flex items-center gap-3">
-              {openUrl ? (
-                <img src={openUrl} alt="" className="size-14 shrink-0 rounded-xl object-cover" />
-              ) : null}
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-foreground">Cette photo</p>
-                <p className="text-xs text-muted-foreground">
-                  Appui long sur la photo pour la déplacer directement.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setOpenPhoto(null)}
-                aria-label="Fermer"
-                className="size-11 shrink-0 rounded-full border border-input text-sm transition-colors hover:bg-muted"
-              >
-                ✕
-              </button>
+          {/* En colonne : aperçu et onglets en haut, contenu qui défile au
+              milieu, actions collées en bas. La croix et les actions restent
+              donc à portée, quelle que soit la longueur de l'onglet ouvert. */}
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Retoucher la photo"
+            className="relative flex max-h-[92svh] w-full flex-col overflow-hidden rounded-t-3xl border border-border bg-card shadow-2xl sm:max-w-lg sm:rounded-3xl"
+            style={{
+              transform: sheetDrag > 0 ? "translateY(" + sheetDrag + "px)" : undefined,
+              transition: sheetStart.current ? "none" : "transform 180ms ease-out",
+            }}
+          >
+            <div
+              className="flex shrink-0 touch-none justify-center pb-1 pt-2.5 sm:hidden"
+              onPointerDown={(event) => {
+                sheetStart.current = { y: event.clientY, pointerId: event.pointerId };
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }}
+              onPointerMove={(event) => {
+                const start = sheetStart.current;
+                if (!start || start.pointerId !== event.pointerId) return;
+                setSheetDrag(Math.max(0, event.clientY - start.y));
+              }}
+              onPointerUp={(event) => {
+                const start = sheetStart.current;
+                sheetStart.current = null;
+                if (!start) return;
+                const distance = event.clientY - start.y;
+                setSheetDrag(0);
+                if (distance > 90) setOpenPhoto(null);
+              }}
+              onPointerCancel={() => {
+                sheetStart.current = null;
+                setSheetDrag(0);
+              }}
+            >
+              <span aria-hidden className="h-1.5 w-11 rounded-full bg-foreground/20" />
             </div>
 
-            <button
-              type="button"
-              onClick={armMove}
-              className="mb-4 h-11 w-full rounded-full border border-input px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              Déplacer vers une autre case
-            </button>
-
-            {renderPhotoActions(openPhoto, () => setOpenPhoto(null))}
+            {renderPhotoActions(openPhoto, {
+              close: () => setOpenPhoto(null),
+              armMove,
+            })}
           </div>
         </div>
       ) : null}
