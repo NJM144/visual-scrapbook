@@ -25,6 +25,13 @@ export interface TextStyle {
   regular: string;
   italic?: string;
   /**
+   * Découper la police à l'embarquement (seuls les caractères utilisés
+   * voyagent). Vrai par défaut ; faux pour la manuscrite, dont les glyphes se
+   * perdaient au découpage de pdf-lib — le fichier est allégé d'avance à
+   * l'alphabet latin, il pèse moins lourd entier qu'une police complète.
+   */
+  subset?: boolean;
+  /**
    * Correction de taille : à corps égal, une manuscrite paraît plus petite
    * qu'un romain. Le facteur s'applique partout, écran et PDF, pour que le
    * changement d'écriture ne bouscule pas la mise en page.
@@ -56,7 +63,11 @@ export const TEXT_STYLES: TextStyle[] = [
     label: "Manuscrite",
     hint: "Une écriture à la main, comme une dédicace au dos d’une photo.",
     css: '"Caveat", "Segoe Script", cursive',
+    // Version aplatie et allégée de Caveat (sans variantes contextuelles ni
+    // crénage, alphabet latin seul) : l'originale perdait des lettres dans le
+    // PDF. La même sert à l'écran, pour que l'aperçu reste fidèle.
     regular: "/fonts/caveat.ttf",
+    subset: false,
     scale: 1.25,
   },
   {

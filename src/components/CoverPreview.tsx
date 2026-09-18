@@ -1,4 +1,5 @@
 import type { BookTheme } from "@/lib/book-themes";
+import { TexteEmoji } from "@/components/TexteEmoji";
 import { effectFilter } from "@/lib/photo-effects";
 import { findTextStyle, type TextStyle } from "@/lib/text-styles";
 import type { PrintFormat } from "@/lib/print-formats";
@@ -164,14 +165,14 @@ function Title({
           letterSpacing: caps ? "0.12em" : "normal",
         }}
       >
-        {title}
+        <TexteEmoji texte={title} />
       </span>
       {subtitle ? (
         <span
           className="mt-[2%] block italic"
           style={{ color, opacity: 0.85, fontSize: "clamp(0.55rem, 2.1cqw, 0.85rem)" }}
         >
-          {subtitle}
+          <TexteEmoji texte={subtitle} />
         </span>
       ) : null}
     </>
@@ -269,7 +270,7 @@ function Composition({
             className="absolute inset-x-0 bottom-[8%] text-center italic"
             style={{ color: ink, opacity: 0.85, fontSize: "clamp(0.5rem, 2cqw, 0.8rem)" }}
           >
-            {subtitle}
+            <TexteEmoji texte={subtitle} />
           </span>
         ) : null}
       </>

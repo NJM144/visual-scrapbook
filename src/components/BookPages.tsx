@@ -1,4 +1,5 @@
 import type { BookPlan, Roadbook } from "@/lib/book-layout";
+import { TexteEmoji } from "@/components/TexteEmoji";
 import { formatTakenAt } from "@/lib/places";
 import type { BookTheme } from "@/lib/book-themes";
 import { effectFilter } from "@/lib/photo-effects";
@@ -181,14 +182,14 @@ export function BookPages({
               {page.kind === "titre" ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center px-[10%] text-center">
                   <span className="text-balance text-[clamp(0.9rem,3.4cqw,1.4rem)] leading-tight">
-                    {title}
+                    <TexteEmoji texte={title} />
                   </span>
                   {subtitle ? (
                     <span
                       className="mt-2 text-[clamp(0.55rem,2cqw,0.75rem)] italic"
                       style={{ color: encreDiscretePage }}
                     >
-                      {subtitle}
+                      <TexteEmoji texte={subtitle} />
                     </span>
                   ) : null}
                 </div>
@@ -217,7 +218,7 @@ export function BookPages({
                       className="text-balance text-[clamp(0.55rem,2.1cqw,0.85rem)] leading-relaxed"
                       style={{ color: encreDiscretePage }}
                     >
-                      {roadbook.places.join(" · ")}
+                      <TexteEmoji texte={roadbook.places.join(" · ")} />
                     </span>
                   ) : null}
                   {roadbook ? (
@@ -233,7 +234,9 @@ export function BookPages({
                   className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-center text-[clamp(0.5rem,1.9cqw,0.7rem)]"
                   style={{ color: encreDiscretePage }}
                 >
-                  <span className="italic">{dateLabel}</span>
+                  <span className="italic">
+                    <TexteEmoji texte={dateLabel} />
+                  </span>
                   <span>{plan.photoCount} photographies</span>
                 </div>
               ) : null}
@@ -336,7 +339,7 @@ export function BookPages({
                             className="block truncate pt-[2%] text-center text-[clamp(0.4rem,1.5cqw,0.6rem)] italic"
                             style={{ color: encrePage }}
                           >
-                            {caption}
+                            <TexteEmoji texte={caption} />
                           </span>
                         ) : null}
                       </>
@@ -362,7 +365,7 @@ export function BookPages({
                             color: encrePage,
                           }}
                         >
-                          {block.text}
+                          <TexteEmoji texte={block.text} />
                         </span>
                       </span>
                     ) : (

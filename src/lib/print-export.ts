@@ -44,6 +44,7 @@ import {
 import { applyEffectToImageData, effectFilter, effectMatrix } from "./photo-effects";
 import { findSticker, stickerUrl, type PageSticker } from "./stickers";
 import { findTextStyle, type TextStyle } from "./text-styles";
+import { contientEmoji, decouper, emojiDe, graphemes, urlTwemoji } from "./emoji";
 import { computePlacement, normalizeFraming, printedDpi, type Framing } from "./photo-framing";
 import {
   LINE_HEIGHT,
@@ -417,6 +418,121 @@ async function drawStickers(
 
 /* ------------------------------------------------------------------ textes */
 
+/**
+ * Les emoji du document en cours de tracé, déjà embarqués.
+ *
+ * Préparés d'avance (voir `preparerEmoji`) pour que le tracé du texte reste
+ * synchrone. Le livre compte deux documents — intérieur et couverture — tracés
+ * l'un après l'autre : chacun installe ses propres images ici avant de tracer.
+ */
+let emojiCourants = new Map<string, PDFImage>();
+/** Emoji qu'on n'a pas pu préparer (réseau coupé) : on le dit à la fin. */
+let emojiManquants = new Set<string>();
+
+/** Côté du carré où l'on dessine un emoji avant de l'embarquer. */
+const EMOJI_PX = 256;
+
+async function rasteriserSvg(url: string): Promise<Uint8Array | null> {
+  try {
+    const reponse = await fetch(url);
+    if (!reponse.ok) return null;
+    const source = URL.createObjectURL(new Blob([await reponse.text()], { type: "image/svg+xml" }));
+    try {
+      const image = new Image();
+      image.src = source;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = EMOJI_PX;
+      canvas.height = EMOJI_PX;
+      canvas.getContext("2d")?.drawImage(image, 0, 0, EMOJI_PX, EMOJI_PX);
+      const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      return png ? new Uint8Array(await png.arrayBuffer()) : null;
+    } finally {
+      URL.revokeObjectURL(source);
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Embarque les emoji d'un document.
+ *
+ * D'abord le fichier du site (public/stickers/emoji-*.png, les 135 du
+ * catalogue), sinon le dessin Twemoji d'origine, rasterisé ici : n'importe
+ * quel emoji du clavier y figure. Un emoji introuvable n'est pas imprimé et la
+ * fiche technique le signale — il ne fait pas échouer l'export.
+ */
+async function preparerEmoji(pdf: PDFDocument, codes: string[]): Promise<Map<string, PDFImage>> {
+  const images = new Map<string, PDFImage>();
+  for (const code of codes) {
+    let octets: Uint8Array | null = null;
+    try {
+      const local = await fetch("/stickers/emoji-" + code + ".png");
+      if (local.ok) octets = new Uint8Array(await local.arrayBuffer());
+    } catch {
+      octets = null;
+    }
+    octets ??= await rasteriserSvg(urlTwemoji(code));
+    if (octets) images.set(code, await pdf.embedPng(octets));
+    else emojiManquants.add(code);
+  }
+  return images;
+}
+
+/** Largeur d'un emoji dans la ligne, en fraction du corps. */
+const EMOJI_LARGEUR = 1.1;
+
+/** Largeur d'un texte, emoji compris. */
+function mesureRiche(text: string, font: PDFFont, sizePt: number): number {
+  if (!contientEmoji(text)) return font.widthOfTextAtSize(text, sizePt);
+  let largeur = 0;
+  for (const morceau of decouper(text)) {
+    if (morceau.type === "texte") largeur += font.widthOfTextAtSize(morceau.valeur, sizePt);
+    else if (emojiCourants.has(morceau.code)) largeur += sizePt * EMOJI_LARGEUR;
+  }
+  return largeur;
+}
+
+/**
+ * Trace une ligne de texte, emoji compris.
+ *
+ * Le texte passe par la police, chaque emoji par son image, posée sur la
+ * ligne de base avec la légère descente d'un caractère — il s'aligne ainsi
+ * sur les lettres comme à l'écran.
+ */
+function traceRiche(
+  page: PDFPage,
+  text: string,
+  x: number,
+  y: number,
+  sizePt: number,
+  font: PDFFont,
+  hex: string,
+) {
+  if (!contientEmoji(text)) {
+    page.drawText(text, { x, y, size: sizePt, font, color: color(hex) });
+    return;
+  }
+  let curseur = x;
+  for (const morceau of decouper(text)) {
+    if (morceau.type === "texte") {
+      page.drawText(morceau.valeur, { x: curseur, y, size: sizePt, font, color: color(hex) });
+      curseur += font.widthOfTextAtSize(morceau.valeur, sizePt);
+      continue;
+    }
+    const image = emojiCourants.get(morceau.code);
+    if (!image) continue;
+    page.drawImage(image, {
+      x: curseur + sizePt * 0.05,
+      y: y - sizePt * 0.12,
+      width: sizePt,
+      height: sizePt,
+    });
+    curseur += sizePt * EMOJI_LARGEUR;
+  }
+}
+
 function drawCentered(
   sheet: Sheet,
   text: string,
@@ -426,39 +542,47 @@ function drawCentered(
   trimWidthMm: number,
   hex: string,
 ) {
-  if (!text) return;
-  const width = font.widthOfTextAtSize(text, sizePt);
+  const propre = safeText(text, font);
+  if (!propre) return;
+  const width = mesureRiche(propre, font, sizePt);
   const xMm = (trimWidthMm - (width / 72) * 25.4) / 2;
   const p = place(sheet, xMm, yMm, 0, 0);
-  sheet.page.drawText(text, { x: p.x, y: p.y, size: sizePt, font, color: color(hex) });
+  traceRiche(sheet.page, propre, p.x, p.y, sizePt, font, hex);
 }
 
 /**
- * Retire les caractères que la police ne sait pas coder.
+ * Retire les caractères que la police ne sait pas dessiner.
  *
- * Les polices standard du PDF couvrent le latin occidental. Un emoji collé
- * dans un paragraphe ferait échouer `drawText` — et donc tout l'export — pour
- * un signe décoratif : mieux vaut l'omettre et livrer le livre.
+ * Une police embarquée ne proteste pas devant un caractère inconnu : elle le
+ * trace en carré vide. On regarde donc son jeu de caractères, et l'on écarte
+ * ce qui n'y figure pas — sauf les emoji, que `traceRiche` pose en image.
  */
-const encodable = new Map<string, boolean>();
+const jeuxDeCaracteres = new WeakMap<PDFFont, Set<number>>();
 function safeText(text: string, font: PDFFont): string {
-  let out = "";
-  for (const char of text) {
-    const cached = encodable.get(char);
-    if (cached === false) continue;
-    if (cached === true) {
-      out += char;
-      continue;
-    }
-    try {
-      font.widthOfTextAtSize(char, 10);
-      encodable.set(char, true);
-      out += char;
-    } catch {
-      encodable.set(char, false);
-    }
+  let jeu = jeuxDeCaracteres.get(font);
+  if (!jeu) {
+    jeu = new Set(font.getCharacterSet());
+    jeuxDeCaracteres.set(font, jeu);
   }
-  return out;
+  const connu = jeu;
+  return decouper(text)
+    .map((morceau) =>
+      morceau.type === "emoji"
+        ? morceau.valeur
+        : [...morceau.valeur]
+            .filter((c) => c === "\n" || connu.has(c.codePointAt(0) ?? 0))
+            .join(""),
+    )
+    .join("");
+}
+
+/** Le texte sans ses emoji : pour le dos du livre, tracé en travers. */
+function sansEmoji(text: string): string {
+  return decouper(text)
+    .filter((morceau) => morceau.type === "texte")
+    .map((morceau) => morceau.valeur)
+    .join("")
+    .trim();
 }
 
 /**
@@ -485,7 +609,7 @@ function drawTextBlock(
   const maxWidthPt = mmToPt(innerWidthMm);
 
   const lines = wrapText(safeText(block.text, font), maxWidthPt, (value) =>
-    font.widthOfTextAtSize(value, sizePt),
+    mesureRiche(value, font, sizePt),
   );
   const lineHeightMm = size.mm * scale * LINE_HEIGHT;
   const innerHeightMm = Math.max(lineHeightMm, slot.heightMm - TEXT_PADDING_MM * 2);
@@ -497,7 +621,7 @@ function drawTextBlock(
 
   shown.forEach((line, index) => {
     if (!line) return;
-    const widthMm = (font.widthOfTextAtSize(line, sizePt) / 72) * 25.4;
+    const widthMm = (mesureRiche(line, font, sizePt) / 72) * 25.4;
     const xMm =
       block.align === "centre"
         ? slot.xMm + (slot.widthMm - widthMm) / 2
@@ -506,7 +630,7 @@ function drawTextBlock(
     // pose alors dans la bande, comme l'aperçu le montre.
     const baselineMm = topMm + index * lineHeightMm + size.mm * scale;
     const point = place(sheet, xMm, baselineMm, 0, 0);
-    sheet.page.drawText(line, { x: point.x, y: point.y, size: sizePt, font, color: color(hex) });
+    traceRiche(sheet.page, line, point.x, point.y, sizePt, font, hex);
   });
 
   return { dropped: lines.length - shown.length };
@@ -514,12 +638,14 @@ function drawTextBlock(
 
 /** Coupe un titre trop long pour la largeur disponible. */
 function fitText(text: string, font: PDFFont, sizePt: number, maxWidthPt: number): string {
-  if (font.widthOfTextAtSize(text, sizePt) <= maxWidthPt) return text;
-  let cut = text;
-  while (cut.length > 4 && font.widthOfTextAtSize(cut + "…", sizePt) > maxWidthPt) {
-    cut = cut.slice(0, -1);
+  const propre = safeText(text, font);
+  if (mesureRiche(propre, font, sizePt) <= maxWidthPt) return propre;
+  // Par graphèmes : couper un emoji en deux laisserait un demi-caractère.
+  const morceaux = graphemes(propre);
+  while (morceaux.length > 4 && mesureRiche(morceaux.join("") + "…", font, sizePt) > maxWidthPt) {
+    morceaux.pop();
   }
-  return cut + "…";
+  return morceaux.join("") + "…";
 }
 
 /**
@@ -596,9 +722,10 @@ async function embedTextStyle(
 
   const regular = await loadFontFile(style.regular);
   if (regular) {
-    const body = await pdf.embedFont(regular, { subset: true });
+    const decoupe = style.subset !== false;
+    const body = await pdf.embedFont(regular, { subset: decoupe });
     const italicFile = style.italic ? await loadFontFile(style.italic) : null;
-    const italic = italicFile ? await pdf.embedFont(italicFile, { subset: true }) : body;
+    const italic = italicFile ? await pdf.embedFont(italicFile, { subset: decoupe }) : body;
     return { body, italic, scale: style.scale };
   }
 
@@ -675,6 +802,21 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   interior.setCreator("PhotoZo");
 
   const ecriture = await embedTextStyle(interior, style, theme.font);
+
+  // Les emoji écrits dans les textes du livre, embarqués une fois pour toutes
+  // avant de tracer : le tracé du texte reste ainsi synchrone.
+  emojiManquants = new Set();
+  emojiCourants = await preparerEmoji(
+    interior,
+    emojiDe([
+      meta.title,
+      meta.subtitle,
+      meta.dateLabel,
+      ...photos.map((photo) => photo.caption),
+      ...plan.pages.flatMap((page) => page.slots.map((slot) => slot.text?.text)),
+      ...(options.roadbook?.places ?? []),
+    ]),
+  );
   const body = ecriture.body;
   const italic = ecriture.italic;
   /** Corps corrigé : une manuscrite se pose plus grande qu'un romain. */
@@ -883,8 +1025,8 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
 
       if (caption) {
         const size = corpsPage(7.5);
-        const text = fitText(safeText(caption, italicPage), italicPage, size, mmToPt(slot.widthMm));
-        const textWidthMm = (italic.widthOfTextAtSize(text, size) / 72) * 25.4;
+        const text = fitText(caption, italicPage, size, mmToPt(slot.widthMm));
+        const textWidthMm = (mesureRiche(text, italicPage, size) / 72) * 25.4;
         const p = place(
           sheet,
           slot.xMm + (slot.widthMm - textWidthMm) / 2,
@@ -892,13 +1034,7 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
           0,
           0,
         );
-        sheet.page.drawText(text, {
-          x: p.x,
-          y: p.y,
-          size,
-          font: italicPage,
-          color: color(encrePage),
-        });
+        traceRiche(sheet.page, text, p.x, p.y, size, italicPage, encrePage);
       }
 
       // Même calcul que le badge du studio : l'écran a déjà prévenu de ce chiffre.
@@ -954,6 +1090,8 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   cover.setCreator("PhotoZo");
 
   const coverEcriture = await embedTextStyle(cover, style, theme.font);
+  // La couverture est un autre document : ses emoji s'y embarquent à nouveau.
+  emojiCourants = await preparerEmoji(cover, emojiDe([meta.title, meta.subtitle]));
   const coverBody = coverEcriture.body;
   const coverItalic = coverEcriture.italic;
 
@@ -995,10 +1133,10 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   ) => {
     if (!text) return;
     const fitted = fitText(text, font, size, mmToPt(W - insetMm * 2));
-    const widthMm = (font.widthOfTextAtSize(fitted, size) / 72) * 25.4;
+    const widthMm = (mesureRiche(fitted, font, size) / 72) * 25.4;
     const xMm = align === "center" ? frontX + (W - widthMm) / 2 : frontX + insetMm;
     const point = place(sheet, xMm, yMm, 0, 0);
-    sheet.page.drawText(fitted, { x: point.x, y: point.y, size, font, color: color(hex) });
+    traceRiche(sheet.page, fitted, point.x, point.y, size, font, hex);
   };
 
   /** Photo cadrée dans un rectangle du plat recto. */
@@ -1110,7 +1248,7 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
 
   // Titre au dos, seulement si le dos est assez large pour rester lisible.
   if (spine >= 8) {
-    const spineText = fitText(meta.title, coverBody, 10, mmToPt(H - 40));
+    const spineText = fitText(sansEmoji(meta.title), coverBody, 10, mmToPt(H - 40));
     const p = place(sheet, W + spine / 2, H / 2, 0, 0);
     sheet.page.drawText(spineText, {
       x: p.x + 3,
@@ -1125,6 +1263,12 @@ export async function exportBook(options: ExportOptions): Promise<ExportResult> 
   const coverBytes = await cover.save();
   tick("Assemblage de la couverture");
 
+  if (emojiManquants.size > 0) {
+    warnings.push(
+      emojiManquants.size +
+        " emoji n’ont pas pu être préparés (réseau indisponible) : ils ne seront pas imprimés.",
+    );
+  }
   const spec = buildSpecSheet(plan, theme, spine, meta, warnings);
 
   // Un seul fichier à télécharger : trois `click()` successifs sur un lien de
