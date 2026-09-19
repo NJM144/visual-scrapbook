@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useRef, useState } from "react";
+import { avalerClicFantome } from "@/lib/ghost-click";
 import { BookPages, type ViewerPhoto } from "@/components/BookPages";
 import {
   MAX_SLOTS_PER_PAGE,
@@ -328,7 +329,12 @@ export function BookEditor({
       const page = press.page;
       const slotIndex = press.index;
       finish();
-      if (!wasActive) setOpenSticker({ page, index: slotIndex });
+      if (!wasActive) {
+        // Le clic tardif du doigt refermait aussitôt ce panneau court : on
+        // l'avale (voir ghost-click.ts).
+        if (upEvent.pointerType !== "mouse") avalerClicFantome();
+        setOpenSticker({ page, index: slotIndex });
+      }
     };
 
     const onCancel = (cancelEvent: PointerEvent) => {
@@ -800,8 +806,11 @@ export function BookEditor({
             onClick={() => setOpenStickers(null)}
             className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
           />
-          <div className="relative max-h-[85svh] w-full overflow-y-auto rounded-t-3xl border border-border bg-card p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl sm:max-w-lg sm:rounded-3xl sm:pb-5">
-            <div className="mb-4 flex items-center gap-3">
+          {/* En colonne : l'en-tête et le pied restent en place, seule la
+              liste défile. Avec 159 vignettes, la croix et « Terminé » ne
+              doivent pas disparaître au premier défilement. */}
+          <div className="relative flex max-h-[88svh] w-full flex-col overflow-hidden rounded-t-3xl border border-border bg-card shadow-2xl sm:max-w-lg sm:rounded-3xl">
+            <div className="flex shrink-0 items-center gap-3 px-5 pb-3 pt-5">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-foreground">
                   Stickers — page {openStickers.number}
@@ -821,95 +830,143 @@ export function BookEditor({
               </button>
             </div>
 
-            {stickersOf(openStickers.index).length >= MAX_STICKERS_PER_PAGE ? (
-              <p className="mb-3 rounded-xl bg-muted px-4 py-3 text-xs text-muted-foreground">
-                Cette page en porte déjà {MAX_STICKERS_PER_PAGE} : au-delà, on ne voit plus les
-                photos. Retirez-en un pour en poser un autre.
-              </p>
-            ) : null}
-
-            {/* Recherche : les emoji se cherchent par leur nom (« cœur »,
-                « gâteau ») autant que par le caractère lui-même, tous deux
-                présents dans l'étiquette. */}
-            <label className="mb-4 flex h-11 items-center gap-2 rounded-full border border-input bg-background px-4">
-              <span aria-hidden>🔎</span>
-              <input
-                type="search"
-                value={stickerSearch}
-                onChange={(event) => setStickerSearch(event.target.value)}
-                placeholder="Chercher : cœur, gâteau, palmier…"
-                className="h-full flex-1 bg-transparent text-base outline-none"
-              />
-              {stickerSearch ? (
-                <button
-                  type="button"
-                  onClick={() => setStickerSearch("")}
-                  aria-label="Effacer la recherche"
-                  className="text-sm text-muted-foreground"
-                >
-                  ✕
-                </button>
-              ) : null}
-            </label>
-
-            {STICKER_FAMILIES.map((family) => {
-              const recherche = stickerSearch.trim().toLowerCase();
-              const dessins = STICKERS.filter(
-                (sticker) =>
-                  sticker.family === family.id &&
-                  (recherche === "" || sticker.label.toLowerCase().includes(recherche)),
-              );
-              if (dessins.length === 0) return null;
-              return (
-                <div key={family.id} className="mb-4">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
-                    {family.label}
-                  </p>
-                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-                    {dessins.map((sticker) => (
+            {stickersOf(openStickers.index).length > 0 ? (
+              <div className="shrink-0 border-b border-border px-5 pb-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+                  Sur cette page — touchez pour retirer
+                </p>
+                {/* Chaque sticker posé, avec sa croix. Un sticker minuscule,
+                    ou caché sous un autre, se retire ici sans avoir à le
+                    viser sur la page. */}
+                {/* Marge haute et droite : la croix déborde du coin de sa vignette, et une
+                    rangée défilante rogne tout ce qui dépasse — la croix
+                    rognée ne recevait plus le doigt. */}
+                <div className="-mx-5 flex gap-3 overflow-x-auto px-5 pb-1 pr-7 pt-2.5">
+                  {stickersOf(openStickers.index).map((pose, index) => {
+                    const dessin = findSticker(pose.id);
+                    // Toute la vignette est le bouton : une petite croix posée
+                    // sur un coin se laissait couvrir par l'image, et le doigt
+                    // tombait à côté. La croix reste dessinée, pour le sens.
+                    return (
                       <button
-                        key={sticker.id}
+                        key={index + "-" + pose.id}
                         type="button"
-                        title={sticker.label}
-                        aria-label={sticker.label}
-                        disabled={stickersOf(openStickers.index).length >= MAX_STICKERS_PER_PAGE}
-                        onClick={() => addSticker(openStickers.index, sticker.id)}
-                        className="flex aspect-square items-center justify-center rounded-2xl border border-border p-2 transition-colors hover:border-foreground/30 hover:bg-muted disabled:opacity-40"
+                        onClick={() => removeSticker(openStickers.index, index)}
+                        aria-label={"Retirer " + (dessin?.label ?? "ce sticker")}
+                        className="relative flex size-14 shrink-0 items-center justify-center rounded-2xl border border-border bg-background p-1.5 transition-colors hover:border-destructive/50"
                       >
                         <img
-                          src={stickerUrl(sticker.id)}
+                          src={stickerUrl(pose.id)}
                           alt=""
-                          loading="lazy"
-                          decoding="async"
-                          className="max-h-full max-w-full object-contain"
+                          className="pointer-events-none max-h-full max-w-full object-contain"
                         />
+                        <span
+                          aria-hidden
+                          className="pointer-events-none absolute -right-1.5 -top-1.5 flex size-6 items-center justify-center rounded-full bg-destructive text-[0.7rem] text-white shadow ring-2 ring-card"
+                        >
+                          ✕
+                        </span>
                       </button>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
-
-            {stickerSearch.trim() &&
-            !STICKERS.some((sticker) =>
-              sticker.label.toLowerCase().includes(stickerSearch.trim().toLowerCase()),
-            ) ? (
-              <p className="mb-4 rounded-xl bg-muted px-4 py-3 text-xs text-muted-foreground">
-                Rien pour « {stickerSearch.trim()} ». Essayez un autre mot, ou effacez la recherche.
-              </p>
+              </div>
             ) : null}
 
-            <p className="mb-4 text-[0.7rem] leading-relaxed text-muted-foreground/70">
-              {EMOJI_CREDIT}.
-            </p>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pt-4">
+              {stickersOf(openStickers.index).length >= MAX_STICKERS_PER_PAGE ? (
+                <p className="mb-3 rounded-xl bg-muted px-4 py-3 text-xs text-muted-foreground">
+                  Cette page en porte déjà {MAX_STICKERS_PER_PAGE} : au-delà, on ne voit plus les
+                  photos. Retirez-en un pour en poser un autre.
+                </p>
+              ) : null}
 
-            <button
-              type="button"
-              onClick={() => setOpenStickers(null)}
-              className="mt-2 h-11 w-full rounded-full bg-terre px-4 text-sm font-medium text-white transition-colors hover:bg-terre/90"
-            >
-              Terminé
-            </button>
+              {/* Recherche : les emoji se cherchent par leur nom (« cœur »,
+                « gâteau ») autant que par le caractère lui-même, tous deux
+                présents dans l'étiquette. */}
+              <label className="mb-4 flex h-11 items-center gap-2 rounded-full border border-input bg-background px-4">
+                <span aria-hidden>🔎</span>
+                <input
+                  type="search"
+                  value={stickerSearch}
+                  onChange={(event) => setStickerSearch(event.target.value)}
+                  placeholder="Chercher : cœur, gâteau, palmier…"
+                  className="h-full flex-1 bg-transparent text-base outline-none"
+                />
+                {stickerSearch ? (
+                  <button
+                    type="button"
+                    onClick={() => setStickerSearch("")}
+                    aria-label="Effacer la recherche"
+                    className="text-sm text-muted-foreground"
+                  >
+                    ✕
+                  </button>
+                ) : null}
+              </label>
+
+              {STICKER_FAMILIES.map((family) => {
+                const recherche = stickerSearch.trim().toLowerCase();
+                const dessins = STICKERS.filter(
+                  (sticker) =>
+                    sticker.family === family.id &&
+                    (recherche === "" || sticker.label.toLowerCase().includes(recherche)),
+                );
+                if (dessins.length === 0) return null;
+                return (
+                  <div key={family.id} className="mb-4">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+                      {family.label}
+                    </p>
+                    <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                      {dessins.map((sticker) => (
+                        <button
+                          key={sticker.id}
+                          type="button"
+                          title={sticker.label}
+                          aria-label={sticker.label}
+                          disabled={stickersOf(openStickers.index).length >= MAX_STICKERS_PER_PAGE}
+                          onClick={() => addSticker(openStickers.index, sticker.id)}
+                          className="flex aspect-square items-center justify-center rounded-2xl border border-border p-2 transition-colors hover:border-foreground/30 hover:bg-muted disabled:opacity-40"
+                        >
+                          <img
+                            src={stickerUrl(sticker.id)}
+                            alt=""
+                            loading="lazy"
+                            decoding="async"
+                            className="max-h-full max-w-full object-contain"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {stickerSearch.trim() &&
+              !STICKERS.some((sticker) =>
+                sticker.label.toLowerCase().includes(stickerSearch.trim().toLowerCase()),
+              ) ? (
+                <p className="mb-4 rounded-xl bg-muted px-4 py-3 text-xs text-muted-foreground">
+                  Rien pour « {stickerSearch.trim()} ». Essayez un autre mot, ou effacez la
+                  recherche.
+                </p>
+              ) : null}
+
+              <p className="mb-4 text-[0.7rem] leading-relaxed text-muted-foreground/70">
+                {EMOJI_CREDIT}.
+              </p>
+            </div>
+
+            <div className="shrink-0 border-t border-border px-5 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 sm:pb-4">
+              <button
+                type="button"
+                onClick={() => setOpenStickers(null)}
+                className="h-12 w-full rounded-full bg-terre px-4 text-sm font-medium text-white transition-colors hover:bg-terre/90"
+              >
+                Terminé
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -942,7 +999,8 @@ export function BookEditor({
                         {dessin?.label ?? "Sticker"}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Appui long sur le sticker pour le déplacer dans la page.
+                        Appui long sur le sticker pour le déplacer. Pour le retirer : le bouton
+                        rouge ci-dessous.
                       </p>
                     </div>
                     <button

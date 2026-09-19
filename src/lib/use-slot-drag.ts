@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AlbumLayout, LayoutSlot } from "./book-layout";
+import { avalerClicFantome } from "./ghost-click";
 
 /**
  * Le geste qui déplace une photo d'une case à l'autre.
@@ -284,7 +285,11 @@ export function useSlotDrag({
         return;
       }
 
+      // Au doigt, le navigateur enverra encore un clic à cette place : il
+      // refermerait le panneau que l'appui va ouvrir (voir ghost-click.ts).
+      const auDoigt = press.touch;
       finish();
+      if (auDoigt) avalerClicFantome();
       tap(position);
     };
 

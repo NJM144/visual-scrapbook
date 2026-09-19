@@ -478,7 +478,10 @@ export function BookPages({
                       : "Page " + page.number}
               </span>
               {editable ? (
-                <span className="flex gap-1.5">
+                /* Les commandes passent à la ligne : huit boutons côte à côte
+                   dépassent la largeur d'un téléphone et font déborder la
+                   page entière, panneaux compris. */
+                <span className="flex flex-wrap justify-end gap-1.5">
                   <button
                     type="button"
                     onClick={() => edit.onPageStyle(photoPage, page.number)}
